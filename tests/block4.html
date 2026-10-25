@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>FloralPro — pruebas del Bloque 4</title>
+<link rel="stylesheet" href="../css/labg-base.css">
+<link rel="stylesheet" href="../css/style.css">
+<style>
+  body { padding: 18px; max-width: 1100px; margin: 0 auto; }
+  .sum { font-size: 1.2rem; font-weight: 700; margin: 8px 0 14px; }
+  .ok { color: var(--success); } .bad { color: var(--danger); }
+  table { width: 100%; border-collapse: collapse; font-size: .82rem; }
+  td { border-bottom: 1px solid var(--border); padding: 3px 6px; vertical-align: top; }
+  td.r { width: 26px; text-align: center; font-weight: 700; }
+  h2 { font-size: 1rem; margin: 18px 0 4px; }
+  iframe { width: 1300px; height: 900px; border: 1px solid var(--border); }
+  .note { font-size: .8rem; color: var(--muted); }
+</style>
+</head>
+<body>
+<h1>FloralPro — pruebas del Bloque 4 (Familias y especies)</h1>
+<div class="sum" id="sum">…</div>
+<div id="out"></div>
+<iframe id="app" src="../index.html#b4"></iframe>
+<script>
+const results = [];
+let section = '';
+const sec = n => { section = n; };
+function ok(c, name, detail) { results.push({ section, pass: !!c, name, detail: detail || '' }); }
+function info(name, detail) { results.push({ section, pass: true, info: true, name, detail: detail || '' }); }
+function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+document.getElementById('app').addEventListener('load', () => setTimeout(run, 700));
+
+async function run() {
+  const W = document.getElementById('app').contentWindow, D = W.document;
+  const KEEP = ['floralpro:myflowers', 'floralpro:draft', 'floralpro:lang', 'floralpro:conv', 'floralpro:colors', 'floralpro:b4'];
+  const kept = {}; KEEP.forEach(k => { kept[k] = W.localStorage.getItem(k); });
+  try { dataTests(W); if (W.B4) await uiTests(W, D); } catch (e) { ok(false, 'Error: ' + e.message, esc(e.stack || '')); }
+  finally { KEEP.forEach(k => { if (kept[k] == null) W.localStorage.removeItem(k); else W.localStorage.setItem(k, kept[k]); }); }
+  report();
+}
+const wait = ms => new Promise(r => setTimeout(r, ms));
+const bil = o => o && typeof o.es === 'string' && o.es.trim() && typeof o.en === 'string' && o.en.trim();
+const bilList = o => o && Array.isArray(o.es) && Array.isArray(o.en) && o.es.length && o.es.length === o.en.length && o.es.every(s => s.trim()) && o.en.every(s => s.trim());
+
+function dataTests(W) {
+  const { FAMILIES, APG, Fam, FM, Formula, Diagram, Section, Flower3D, B2, B3 } = W;
+  const PO = { sex: true, bracts: true, ovules: true };
+
+  sec('1. Estructura del catálogo');
+  const ids = FAMILIES.map(f => f.id);
+  ok(new Set(ids).size === ids.length, `${FAMILIES.length} familias con identificador único`);
+  ok(new Set(FAMILIES.map(f => f.name)).size === FAMILIES.length, 'Sin nombres de familia repetidos');
+  const badName = FAMILIES.filter(f => !/^[A-Z][a-z]+aceae$/.test(f.name));
+  ok(!badName.length, 'Todos los nombres terminan en -aceae', badName.map(f => f.name).join(', '));
+  const badOrder = FAMILIES.filter(f => !Fam.orderOf(f));
+  ok(!badOrder.length, 'Cada familia pertenece a un orden del árbol APG IV', badOrder.map(f => f.name + ' (' + f.order + ')').join(', '));
+  const badOrdName = APG.orders.filter(o => !/ales$/.test(o[0]) || !APG.clades.some(c => c.id === o[1]));
+  ok(!badOrdName.length, 'Cada orden termina en -ales y cuelga de un clado existente', badOrdName.map(o => o[0]).join(', '));
+  const emptyOrd = APG.orders.filter(o => !FAMILIES.some(f => f.order === o[0]));
+  ok(!emptyOrd.length, 'Ningún orden del árbol queda vacío', emptyOrd.map(o => o[0]).join(', '));
+  const noBil = FAMILIES.filter(f => !(f.es && f.en && bilList(f.chars) && bil(f.fruit) && bil(f.mx)));
+  ok(!noBil.length, 'Nombre común, caracteres, fruto e importancia en México en ambos idiomas', noBil.map(f => f.name).join(', '));
+  const fewChars = FAMILIES.filter(f => f.chars.es.length < 3);
+  ok(!fewChars.length, 'Al menos tres caracteres distintivos por familia', fewChars.map(f => f.name).join(', '));
+
+  const SP = FAMILIES.flatMap(f => f.species.map(s => ({ f, s })));
+  const stOK = new Set(Object.keys(Fam.ST));
+  const badSt = SP.filter(x => !stOK.has(x.s.st));
+  ok(!badSt.length, `${SP.length} especies con estatus válido en México`, badSt.map(x => x.s.sci + ': ' + x.s.st).join(', '));
+  const badSp = SP.filter(x => !(x.s.sci && x.s.es && x.s.en && bil(x.s.note)));
+  ok(!badSp.length, 'Cada especie tiene nombre científico, nombres comunes y nota en ambos idiomas', badSp.map(x => x.s.sci).join(', '));
+  const sciRe = /^[A-Z][a-z]+( × [a-z-]+| [a-z-]+( (subsp|var)\. [a-z-]+)?| × [a-z]+)?$/;
+  const badSci = SP.filter(x => !sciRe.test(x.s.sci));
+  ok(!badSci.length, 'Los nombres científicos tienen la forma Género especie', badSci.map(x => x.s.sci).join(', '));
+  const dupSci = SP.map(x => x.s.sci).filter((s, i, a) => a.indexOf(s) !== i);
+  ok(!dupSci.length, 'Ninguna especie se repite', dupSci.join(', '));
+  const fewSp = FAMILIES.filter(f => !f.species.length);
+  ok(!fewSp.length, 'Cada familia tiene al menos una especie', fewSp.map(f => f.name).join(', '));
+  const labels = FAMILIES.flatMap(f => [...(Array.isArray(f.typical) ? f.typical : []), ...(f.variants || []), ...f.species.flatMap(s => s.flowers || [])]);
+  const badLab = labels.filter(x => x.label && !bil(x.label));
+  ok(!badLab.length, 'Etiquetas de flores en ambos idiomas', badLab.length + ' sin traducir');
+  const multi = FAMILIES.filter(f => Array.isArray(f.typical) && f.typical.some(x => !x.label));
+  ok(!multi.length, 'Cuando la flor típica son varias (♂ y ♀), cada una lleva etiqueta', multi.map(f => f.name).join(', '));
+
+  sec('2. Cada flor del catálogo se resuelve y es coherente');
+  const ALL = [];
+  let unresolved = [];
+  FAMILIES.forEach(f => {
+    let list;
+    try { list = Fam.allFlowers(f); } catch (e) { unresolved.push(f.name + ': ' + e.message); return; }
+    list.forEach(x => {
+      const who = f.name + ' · ' + (x.kind === 'species' ? x.sp.sci : x.kind + ' ' + x.i) + (x.label ? ' (' + x.label.es + ')' : '');
+      if (!x.m) unresolved.push(who); else ALL.push({ f, x, who });
+    });
+  });
+  ok(!unresolved.length, `${ALL.length} flores (típicas, variantes y de especie) se resuelven`, unresolved.join('<br>'));
+  const warn = [], infos = [];
+  ALL.forEach(a => {
+    const c = B2.checks(a.x.m);
+    c.filter(z => z.lvl === 'warn').forEach(z => warn.push(a.who + ': ' + z.es));
+    c.filter(z => z.lvl !== 'warn').forEach(z => infos.push(a.who + ': ' + z.es));
+  });
+  ok(!warn.length, 'Ninguna flor tiene incoherencias (las revisiones del constructor)', warn.join('<br>'));
+  if (infos.length) info(`${infos.length} observaciones menores del constructor (no son errores)`, infos.join('<br>'));
+  const sexBad = ALL.filter(a => {
+    const lab = a.x.label ? a.x.label.es.toLowerCase() : '';
+    const sx = FM.normalize(a.x.m).sex;
+    return (/estaminad|masculin/.test(lab) && sx !== 'staminate') || (/pistilad|femenin/.test(lab) && sx !== 'pistillate');
+  });
+  ok(!sexBad.length, 'Las flores rotuladas como estaminadas o pistiladas lo son en el modelo', sexBad.map(a => a.who).join('<br>'));
+  const parts = ALL.filter(a => { const f = FM.normalize(a.x.m); return !['K', 'C', 'P', 'A', 'G'].some(k => f[k]); });
+  ok(!parts.length, 'Toda flor tiene al menos un verticilo', parts.map(a => a.who).join(', '));
+
+  sec('3. Cada flor se dibuja y su fórmula se lee de vuelta');
+  const drawBad = [], rtBad = [], glBad = new Set();
+  ALL.forEach(a => {
+    try {
+      const f = FM.normalize(a.x.m);
+      const outs = [Formula.html(f, 'classic'), Formula.html(f, 'prenner', PO), Diagram.svg(f, { colors: 'natural' }), Diagram.svg(f, { colors: 'whorl' }), Section.svg(f), FM.describe(f, 'es').map(z => z.html).join(' '), FM.describe(f, 'en').map(z => z.html).join(' ')];
+      const sc = Flower3D.build(f, { explode: 0.6 });
+      const finite = sc.prims.every(p => (p.pts || [p.c]).every(q => q.every(Number.isFinite)));
+      if (outs.some(o => /NaN|undefined|Infinity/.test(o)) || !finite) drawBad.push(a.who);
+      for (const conv of ['classic', 'prenner']) {
+        const o = conv === 'prenner' ? PO : {};
+        const t1 = Formula.text(f, conv, o), r = Formula.parse(t1), t2 = Formula.text(r.model, conv, o);
+        if (t1 !== t2 || r.warnings.length) rtBad.push(`${a.who} [${conv}]: ${esc(t1)} → ${esc(t2)} ${r.warnings.join('; ')}`);
+      }
+      const html = outs[5] + ' ' + outs[6];
+      [...html.matchAll(/data-term="([^"]+)"/g)].forEach(m => { if (!B3.lookup(m[1])) glBad.add(m[1] + ' (' + a.f.name + ')'); });
+    } catch (e) { drawBad.push(a.who + ': ' + e.message); }
+  });
+  ok(!drawBad.length, 'Fórmulas, diagrama, corte, flor 3D y descripción sin errores ni números inválidos', drawBad.join('<br>'));
+  ok(!rtBad.length, 'Las fórmulas (clásica y de Prenner) se leen y se reescriben igual', rtBad.join('<br>'));
+  ok(!glBad.size, 'Cada término de las descripciones está en el glosario', [...glBad].join(', '));
+}
+
+async function uiTests(W, D) {
+  const { FAMILIES, Fam, FM, Formula, B4, B2, I18N } = W;
+  const $ = s => D.querySelector(s), $$ = s => [...D.querySelectorAll(s)];
+  const vis = n => n && n.style.display !== 'none' && W.getComputedStyle(n).display !== 'none';
+  const shownCards = () => $$('#b4Grid .fm-card').filter(c => c.style.display !== 'none').map(c => c.dataset.id);
+  const click = n => n.dispatchEvent(new W.MouseEvent('click', { bubbles: true }));
+  if (W.state.conv !== 'classic') W.setConv('classic');
+  if (I18N.lang !== 'es') I18N.set('es');
+
+  sec('4. Catálogo');
+  W.goStep(4);
+  B4.toList();
+  const step = $('.step-btn[data-step="4"]');
+  ok(step && !step.querySelector('.soon'), 'El bloque 4 ya no dice «pronto» en la barra de pasos');
+  ok($('#panel-4').classList.contains('active') && vis($('#b4List')), 'El panel 4 abre en el catálogo');
+  ok($$('#b4Grid .fm-card').length === FAMILIES.length, `Una tarjeta por familia (${FAMILIES.length})`);
+  const grouped = FAMILIES.filter(f => !B4.groupOf(f));
+  ok(!grouped.length && $$('#b4Grid .fm-sec').length === B4.GROUPS.length, `Las familias quedan en los ${B4.GROUPS.length} grandes grupos de APG IV`, grouped.map(f => f.name).join(', '));
+  ok($$('#b4Tree .tr-f').length === FAMILIES.length, 'El árbol lateral enlaza a todas las familias');
+  const orderSeq = FAMILIES.map(f => W.APG.orders.findIndex(o => o[0] === f.order));
+  ok(orderSeq.every((v, i) => i === 0 || v >= orderSeq[i - 1]), 'Las familias siguen el orden de APG IV (orden por orden)');
+  await wait(300);
+  ok($$('#b4Grid .fm-fig[data-done]').length > 0, 'Los diagramas de las tarjetas visibles se dibujan');
+  const two = $$('#b4Grid .fm-card').filter(c => { const f = Fam.byId(c.dataset.id); return Array.isArray(f.typical); });
+  ok(two.every(c => c.querySelector('.fm-fig').classList.contains('two') && c.querySelectorAll('.fm-form > div').length === 2), `Las ${two.length} familias de flores unisexuales muestran la flor ♂ y la ♀`);
+
+  sec('5. Filtros y búsqueda');
+  for (const t of B4.TRAITS) {
+    click($(`#b4Filters [data-flt="tr:${t.id}"]`));
+    const exp = FAMILIES.filter(f => B4.hasTrait(f, t)).map(f => f.id);
+    const got = shownCards();
+    ok(got.length === exp.length && exp.every(id => got.includes(id)), `Filtro «${t.es}»: ${got.length} familias, las que el motor reconoce`, got.length !== exp.length ? `esperaba ${exp.length}` : '');
+    click($(`#b4Filters [data-flt="tr:${t.id}"]`));
+  }
+  const inf = shownCards;
+  click($('#b4Filters [data-flt="tr:inferior"]'));
+  const infIds = inf();
+  ok(infIds.includes('orchidaceae') && infIds.includes('asteraceae') && !infIds.includes('liliaceae'), 'Ovario ínfero: incluye orquídeas y compuestas, no liliáceas');
+  click($('#b4Filters [data-flt="st:end"]'));
+  const both = inf();
+  ok(both.length && both.every(id => { const f = Fam.byId(id); return f.species.some(s => s.st === 'end') && B4.hasTrait(f, B4.TRAITS.find(t => t.id === 'inferior')); }), `Dos filtros a la vez se combinan (ovario ínfero y especies endémicas: ${both.length})`);
+  ok(vis($('#b4Clear')), 'Aparece «Quitar filtros»');
+  click($('#b4Clear'));
+  ok(shownCards().length === FAMILIES.length && !B4.S.filters.size, '«Quitar filtros» devuelve las 82 familias');
+  const search = q => { $('#b4Search').value = q; $('#b4Search').dispatchEvent(new W.Event('input', { bubbles: true })); return shownCards(); };
+  let r = search('maiz');
+  ok(r.length === 1 && r[0] === 'poaceae' && /Zea mays/.test($('#fc-poaceae .fm-match').textContent), 'Buscar «maiz» (sin acento) encuentra Poaceae y dice qué especie coincide');
+  r = search('Salvia');
+  ok(r.includes('lamiaceae'), 'Buscar «Salvia» encuentra Lamiaceae');
+  r = search('Asparagales');
+  ok(r.length === 4 && r.every(id => Fam.byId(id).order === 'Asparagales'), 'Buscar un orden muestra sus familias (Asparagales: 4)');
+  r = search('xyzw');
+  ok(!r.length && vis($('#b4Empty')), 'Una búsqueda sin resultados lo avisa');
+  search('');
+  ok(shownCards().length === FAMILIES.length, 'Al borrar la búsqueda vuelven todas');
+
+  sec('6. Ficha de familia');
+  click($('#fc-fabaceae'));
+  const fab = Fam.byId('fabaceae'), fabFl = Fam.allFlowers(fab);
+  ok(B4.S.mode === 'sheet' && vis($('#b4Sheet')) && !vis($('#b4List')), 'Clic en una tarjeta abre su ficha');
+  ok(/#b4&f=fabaceae$/.test(W.location.hash), 'La dirección guarda la ficha abierta (#b4&f=fabaceae)', W.location.hash);
+  ok($$('#b4Fl .chip').length === fabFl.length, `Un botón por flor: típica, variantes y especies (${fabFl.length})`);
+  ok($('#b4Views svg.fdiagram') && $('#b4Views .v-3d svg') && $('#b4Views svg.fsection'), 'La ficha muestra la flor en 3D, el diagrama y el corte');
+  const vtxt = () => $('#b4Views .v-ftxt').textContent;
+  ok(vtxt() === Formula.text(fabFl[0].m, 'classic', { bracts: true, ovules: true }), 'La fórmula de la ficha es la de la flor típica');
+  const kMim = fabFl.findIndex(x => x.kind === 'variant');
+  click($(`#b4Fl .chip[data-fi="${kMim}"]`));
+  ok(vtxt() === Formula.text(fabFl[kMim].m, 'classic', { bracts: true, ovules: true }) && /✱/.test(vtxt()), 'Elegir la variante mimosoide cambia las vistas a una flor actinomorfa');
+  const spBtns = $$('#b4SheetBody .sp-row [data-fi]');
+  ok(spBtns.length === fab.species.filter(s => s.m || s.flowers).length, 'Solo las especies con flor propia tienen «Ver su flor»');
+  click(spBtns[2]);
+  const kx = +spBtns[2].dataset.fi;
+  ok(vtxt() === Formula.text(fabFl[kx].m, 'classic', { bracts: true, ovules: true }) && $$('#b4SheetBody .sp-row.on').length === 1, '«Ver su flor» muestra la flor de esa especie y marca su renglón');
+  ok($$('#b4SheetBody .fs-chars li').length === fab.chars.es.length, 'Caracteres distintivos completos');
+  ok($$('#b4SheetBody .sp-row').length === fab.species.length, `Todas las especies (${fab.species.length}) con su estatus`);
+  click($('#b4SheetHead [data-go]:last-child'));
+  const iF = FAMILIES.indexOf(fab);
+  ok(B4.S.fam === FAMILIES[iF + 1], `«Siguiente» abre ${FAMILIES[iF + 1].name}`);
+  D.dispatchEvent(new W.KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
+  ok(B4.S.fam === fab, 'La flecha ← del teclado regresa a Fabaceae');
+  B4.openFamily('asteraceae');
+  const ast = Fam.allFlowers(Fam.byId('asteraceae'));
+  const kT = ast.findIndex(x => x.kind === 'species' && x.sp.sci === 'Tagetes erecta' && x.label && /radio/.test(x.label.es));
+  click($(`#b4Fl .chip[data-fi="${kT}"]`));
+  ok(/♀/.test(vtxt()) && B2.checks(ast[kT].m).every(c => c.lvl !== 'warn'), 'Flor del radio del cempasúchil: pistilada y coherente');
+
+  sec('7. Del catálogo al constructor');
+  B4.openFamily('solanaceae');
+  const sol = Fam.allFlowers(Fam.byId('solanaceae'));
+  const kC = sol.findIndex(x => x.kind === 'species' && x.sp.sci === 'Datura stramonium');
+  click($(`#b4Fl .chip[data-fi="${kC}"]`));
+  click($('#b4SheetHead [data-act="build"]'));
+  ok($('#panel-2').classList.contains('active'), '«Abrir esta flor en el constructor» lleva al bloque 2');
+  ok(Formula.text(B2.S.m, 'prenner', { ovules: true }) === Formula.text(sol[kC].m, 'prenner', { ovules: true }) && /Datura/.test(B2.S.name), 'El constructor recibe la misma flor (toloache) con su nombre', B2.S.name);
+  W.goStep(4);
+  ok(B4.S.mode === 'sheet' && B4.S.fam.id === 'solanaceae' && /f=solanaceae/.test(W.location.hash), 'Al volver al bloque 4 sigue abierta la ficha');
+  B4.toList();
+  ok(B4.S.mode === 'list' && W.location.hash === '#b4', '«Todas las familias» regresa al catálogo');
+
+  sec('8. Comparador');
+  B4.openCmp('liliaceae', 'amaryllidaceae');
+  const rowsDiff = () => $$('#b4Cmp .cmp-table tbody tr.diff th').map(t => t.textContent.trim());
+  ok(vis($('#b4Cmp')) && $$('#b4Cmp .cmp-table tbody tr').length === 12, 'El comparador muestra dos columnas y 12 caracteres');
+  let d = rowsDiff();
+  ok(d.some(t => /Ovario/.test(t)) && d.some(t => /Orden/.test(t)) && !d.some(t => /Simetría/.test(t)), 'Liliáceas contra amarilidáceas: difieren en el orden y el ovario, no en la simetría', d.join(' | '));
+  ok(/cmp=liliaceae,amaryllidaceae/.test(W.location.hash), 'La dirección guarda la comparación');
+  click($('#b4Cmp [data-act="swap"]'));
+  ok(B4.S.cmp[0].id === 'amaryllidaceae' && $('#b4Cmp thead th:nth-child(2)').textContent === 'Amaryllidaceae', '⇄ intercambia los lados');
+  const selB = $('#b4Cmp .cmp-fam[data-side="1"]');
+  selB.value = 'amaryllidaceae'; selB.dispatchEvent(new W.Event('change', { bubbles: true }));
+  ok(!rowsDiff().length, 'Una familia contra sí misma no tiene diferencias');
+  const fl1 = $('#b4Cmp .cmp-fl[data-side="1"]');
+  fl1.value = '1'; fl1.dispatchEvent(new W.Event('change', { bubbles: true }));
+  d = rowsDiff();
+  ok(d.some(t => /Ovario/.test(t)), 'Amarilidoideas contra alioideas (ajo, cebolla): difieren en la posición del ovario', d.join(' | '));
+  B4.openCmp('fabaceae', 'rosaceae');
+  const cmpBad = [];
+  for (let i = 0; i < FAMILIES.length; i += 7) { try { B4.openCmp(FAMILIES[i].id, FAMILIES[(i + 40) % FAMILIES.length].id); if ($$('#b4Cmp .cmp-table tbody tr').length !== 12 || /NaN|undefined/.test($('#b4Cmp').innerHTML)) cmpBad.push(FAMILIES[i].name); } catch (e) { cmpBad.push(FAMILIES[i].name + ': ' + e.message); } }
+  ok(!cmpBad.length, 'El comparador funciona con familias de todo el árbol', cmpBad.join(', '));
+  B4.openFamily('rosaceae');
+  const sw = $('#b4CmpWith'); sw.value = 'fabaceae'; sw.dispatchEvent(new W.Event('change', { bubbles: true }));
+  ok(B4.S.mode === 'cmp' && B4.S.cmp[0].id === 'rosaceae' && B4.S.cmp[1].id === 'fabaceae', '«Comparar con…» desde una ficha abre el comparador con esa familia');
+
+  sec('9. Todas las fichas y todas sus flores');
+  const bad = [];
+  let nfl = 0;
+  for (const f of FAMILIES) {
+    try {
+      B4.openFamily(f.id);
+      const fl = Fam.allFlowers(f);
+      for (let k = 0; k < fl.length; k++) {
+        B4.selectFlower(k);
+        nfl++;
+        if (vtxt() !== Formula.text(fl[k].m, 'classic', { bracts: true, ovules: true })) bad.push(f.name + ' #' + k);
+      }
+      if (/NaN|undefined/.test($('#b4Sheet').innerHTML)) bad.push(f.name + ': texto inválido');
+    } catch (e) { bad.push(f.name + ': ' + e.message); }
+  }
+  ok(!bad.length, `Las ${FAMILIES.length} fichas abren y sus ${nfl} flores se muestran con su fórmula`, bad.slice(0, 20).join('<br>'));
+
+  sec('10. Idioma, convención y enlaces directos');
+  B4.toList();
+  I18N.set('en');
+  ok(/Monocots/.test($('#b4Tree').textContent) && /Typical flower/.test($('#b4Filters').textContent) && /82 families/.test($('#b4Count').textContent), 'En inglés: árbol, filtros y conteo traducidos');
+  I18N.set('es');
+  W.setConv('prenner');
+  ok($$('#b4Grid .fm-form .ff-prenner').length >= FAMILIES.length, 'Con la convención de Prenner, las tarjetas cambian de fórmula');
+  W.setConv('classic');
+  W.location.hash = '#b4&f=cactaceae';
+  await wait(150);
+  ok(B4.S.mode === 'sheet' && B4.S.fam.id === 'cactaceae', 'Un enlace #b4&f=cactaceae abre la ficha de las cactáceas');
+  W.location.hash = '#b4&cmp=poaceae,cyperaceae';
+  await wait(150);
+  ok(B4.S.mode === 'cmp' && B4.S.cmp[1].id === 'cyperaceae', 'Un enlace #b4&cmp=… abre la comparación');
+  const card = () => { B4.toList(); return $('#fc-orchidaceae'); };
+  card().dispatchEvent(new W.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  ok(B4.S.fam.id === 'orchidaceae' && B4.S.mode === 'sheet', 'Una tarjeta se abre también con la tecla Intro (accesible sin ratón)');
+  B4.toList();
+  const home = [...D.querySelectorAll('#featureGrid .feature')].find(x => x.dataset.go === '4');
+  ok(home && !home.querySelector('.f-soon') && home.textContent.includes(String(FAMILIES.length)), 'La portada ya no dice «pronto» y da el número real de familias');
+
+  sec('11. En un teléfono (390 px de ancho)');
+  const fr = document.createElement('iframe');
+  fr.style.cssText = 'width:390px;height:800px';
+  document.body.appendChild(fr);
+  for (const [h, what] of [['#b4', 'catálogo'], ['#b4&f=fabaceae', 'ficha'], ['#b4&cmp=liliaceae,amaryllidaceae', 'comparador']]) {
+    fr.src = '../index.html?w=' + encodeURIComponent(what) + h;
+    await new Promise(r => { fr.onload = r; });
+    await wait(500);
+    const M = fr.contentWindow.document;
+    const over = M.documentElement.scrollWidth - M.documentElement.clientWidth;
+    const wide = [...M.querySelectorAll('#panel-4 *')].filter(n => n.getBoundingClientRect().right > M.documentElement.clientWidth + 1 && n.getBoundingClientRect().width > 0).slice(0, 4).map(n => n.tagName + '.' + n.className);
+    ok(over <= 0, `Sin desbordamiento horizontal: ${what}`, over > 0 ? over + ' px; ' + wide.join(', ') : '');
+  }
+  fr.remove();
+}
+
+function report() {
+  const bad = results.filter(r => !r.pass), n = results.filter(r => !r.info).length;
+  const sum = document.getElementById('sum');
+  sum.innerHTML = bad.length ? `<span class="bad">${bad.length} de ${n} pruebas fallan</span>` : `<span class="ok">Las ${n} pruebas pasan</span>`;
+  sum.dataset.pass = n - bad.length; sum.dataset.fail = bad.length;
+  let h = '', cur = null;
+  results.forEach(r => {
+    if (r.section !== cur) { if (cur !== null) h += '</table>'; h += `<h2>${r.section}</h2><table>`; cur = r.section; }
+    h += `<tr><td class="r ${r.info ? '' : r.pass ? 'ok' : 'bad'}">${r.info ? 'i' : r.pass ? '✓' : '✗'}</td><td>${r.name}${r.detail ? `<div class="note">${r.detail}</div>` : ''}</td></tr>`;
+  });
+  document.getElementById('out').innerHTML = h + '</table>';
+}
+</script>
+</body>
+</html>

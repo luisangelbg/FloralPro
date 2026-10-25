@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>FloralPro — pruebas del Bloque 6</title>
+<link rel="stylesheet" href="../css/labg-base.css">
+<link rel="stylesheet" href="../css/style.css">
+<style>
+  body { padding: 18px; max-width: 1100px; margin: 0 auto; }
+  .sum { font-size: 1.2rem; font-weight: 700; margin: 8px 0 14px; }
+  .ok { color: var(--success); } .bad { color: var(--danger); }
+  table { width: 100%; border-collapse: collapse; font-size: .82rem; }
+  td { border-bottom: 1px solid var(--border); padding: 3px 6px; vertical-align: top; }
+  td.r { width: 26px; text-align: center; font-weight: 700; }
+  h2 { font-size: 1rem; margin: 18px 0 4px; }
+  iframe { width: 1300px; height: 900px; border: 1px solid var(--border); }
+  .note { font-size: .8rem; color: var(--text-muted); }
+</style>
+</head>
+<body>
+<h1>FloralPro — pruebas del Bloque 6 (Autoevaluación)</h1>
+<div class="sum" id="sum">…</div>
+<div id="out"></div>
+<iframe id="app" src="../index.html#b6"></iframe>
+<script>
+const results = [];
+let section = '';
+const sec = n => { section = n; };
+function ok(c, name, detail) { results.push({ section, pass: !!c, name, detail: detail || '' }); }
+function info(name, detail) { results.push({ section, pass: true, info: true, name, detail: detail || '' }); }
+function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+const wait = ms => new Promise(r => setTimeout(r, ms));
+document.getElementById('app').addEventListener('load', () => setTimeout(run, 700));
+
+async function run() {
+  const W = document.getElementById('app').contentWindow, D = W.document;
+  const KEEP = ['floralpro:myflowers', 'floralpro:draft', 'floralpro:lang', 'floralpro:conv', 'floralpro:colors', 'floralpro:q6'];
+  const kept = {}; KEEP.forEach(k => { kept[k] = W.localStorage.getItem(k); });
+  const before = new Set(Object.keys(W.localStorage));
+  try { engineTests(W); await uiTests(W, D); } catch (e) { ok(false, 'Error: ' + e.message, esc(e.stack || '')); }
+  finally {
+    KEEP.forEach(k => { if (kept[k] == null) W.localStorage.removeItem(k); else W.localStorage.setItem(k, kept[k]); });
+    Object.keys(W.localStorage).forEach(k => { if (!before.has(k) && k.startsWith('floralpro:q6:')) W.localStorage.removeItem(k); });
+  }
+  report();
+}
+const ALL = ['fwrite', 'fpick', 'fdiag', 'fread', 'tname', 'tdef', 'tfig', 'gname', 'ggroup', 'gflor'];
+const sig = q => [q.type, q.flower ? q.flower.fam + (q.flower.sci || '') + q.flower.kind : q.plate ? q.plate.id : q.strob ? q.strob + q.stage + (q.org || q.grp || '') : 'trait' + q.trait, q.correct, (q.opts || []).map(o => o.plate ? o.plate.id : o.m ? JSON.stringify(o.m).length : o.org || o.grp || o.key).join('/')].join('|');
+
+function engineTests(W) {
+  const { QUIZ, FM, Formula, Diagram } = W;
+  sec('1. Banco de preguntas');
+  const fl = QUIZ.flowers();
+  const by = l => QUIZ.flowersFor(l).length;
+  ok(fl.length > 150 && by('basic') >= 40 && by('mid') > by('basic') && by('adv') === fl.length, `Flores para las preguntas: básico ${by('basic')}, intermedio ${by('mid')}, avanzado ${by('adv')}`);
+  const cfg = { types: ALL, n: 21, level: 'adv', conv: 'classic', seed: 12345 };
+  const a = QUIZ.generate(cfg).map(sig), b = QUIZ.generate(cfg).map(sig);
+  ok(a.join() === b.join(), 'La misma semilla da las mismas preguntas, en el mismo orden y con las mismas opciones');
+  const c = QUIZ.generate(Object.assign({}, cfg, { seed: 999 })).map(sig);
+  ok(a.join() !== c.join(), 'Otra semilla da otro examen');
+  const types = new Set(QUIZ.generate(cfg).map(q => q.type));
+  ok(ALL.every(t => types.has(t)), 'Con los diez tipos elegidos, aparecen los diez');
+
+  sec('2. Preguntas de opción múltiple bien formadas');
+  const bad = [];
+  let nq = 0;
+  for (let s = 1; s <= 40; s++) for (const level of ['basic', 'mid', 'adv']) {
+    const conv = s % 2 ? 'classic' : 'prenner';
+    QUIZ.generate({ types: ALL, n: 14, level, conv, seed: s * 7919 }).forEach(q => {
+      nq++;
+      if (q.type === 'fwrite') { if (!q.target) bad.push('fwrite sin flor'); return; }
+      if (!(q.correct >= 0 && q.correct < q.opts.length)) { bad.push(q.type + ': respuesta fuera de rango'); return; }
+      if (q.type === 'fpick' || q.type === 'fdiag') {
+        const t = q.opts.map(o => Formula.text(o.m, conv, {}));
+        if (q.opts.length !== 4) bad.push(q.type + ': ' + q.opts.length + ' opciones (' + (q.flower.sci || q.flower.fam) + ')');
+        if (new Set(t).size !== t.length) bad.push(q.type + ': opciones repetidas');
+        if (t[q.correct] !== Formula.text(q.flower.m, conv, {})) bad.push(q.type + ': la opción correcta no es la flor');
+        if (q.type === 'fdiag') { const d = q.opts.map(o => Diagram.svg(o.m, { colors: 'natural' }).replace(/dgH\d+/g, 'H')); if (d.some((x, i) => i !== q.correct && x === d[q.correct])) bad.push('fdiag: un diagrama incorrecto se ve igual al correcto'); }
+      }
+      if (q.type === 'fread') {
+        const f = FM.normalize(q.flower.m), key = q.opts[q.correct].key;
+        if (new Set(q.opts.map(o => o.key)).size !== q.opts.length) bad.push('fread: opciones repetidas');
+        if (q.kind === 'pos' && key !== f.G.pos) bad.push('fread pos');
+        if (q.kind === 'per' && key !== FM.perianthType(f)) bad.push('fread per');
+        if (q.kind === 'gyn' && key !== FM.gynoeciumType(f).type) bad.push('fread gyn');
+      }
+      if (q.type[0] === 't') {
+        const ids = q.opts.map(o => o.plate.id);
+        if (new Set(ids).size !== ids.length || new Set(q.opts.map(o => o.plate.t[0])).size !== ids.length) bad.push(q.type + ': opciones repetidas');
+        if (q.opts[q.correct].plate !== q.plate) bad.push(q.type + ': la correcta no es la lámina');
+        if ((q.type === 'tname' || q.type === 'tfig') && q.opts.some(o => !QUIZ.cleanFig(o.plate) || QUIZ.cleanFig(o.plate).t === 'art')) bad.push(q.type + ': figura con texto');
+        q.opts.forEach((o, i) => { if (i !== q.correct && QUIZ.clash(o.plate, q.plate)) bad.push(q.type + ': «' + o.plate.t[0] + '» también es correcta para «' + q.plate.t[0] + '»'); });
+        if (q.type === 'tname' || q.type === 'tfig') q.opts.forEach((o, i) => { if (i !== q.correct && QUIZ.figSig(o.plate) === QUIZ.figSig(q.plate)) bad.push(q.type + ': misma figura en «' + o.plate.t[0] + '» y «' + q.plate.t[0] + '»'); });
+      }
+      if (q.type === 'gname') {
+        const m = W.GYMNO.byId(q.strob), svg = W.ConeFig.section(m, { stage: q.stage, labels: false, focus: q.org });
+        const keys = q.opts.map(o => o.org);
+        if (q.opts.length !== 4 || new Set(keys).size !== 4) bad.push('gname: opciones repetidas o incompletas');
+        if (keys[q.correct] !== q.org) bad.push('gname: la correcta no es la parte resaltada');
+        if (!svg.includes(`class="c-o hl" data-org="${q.org}"`)) bad.push('gname: la parte no se ve resaltada en el corte (' + q.strob + ' ' + q.org + ')');
+        const confuse = { bscale: ['bract', 'scale'], ov: ['seed', 'sarc'], seed: ['ov', 'sarc'], sarc: ['ov', 'seed'], spor: ['syn'], axis: ['ped', 'stem'] }[q.org] || [];
+        if (keys.some(k => confuse.includes(k))) bad.push('gname: una opción incorrecta también podría ser correcta (' + q.org + ': ' + keys.join(', ') + ')');
+      }
+      if (q.type === 'ggroup') {
+        const m = W.GYMNO.byId(q.strob), keys = q.opts.map(o => o.grp);
+        if (q.opts.length !== 4 || new Set(keys).size !== 4) bad.push('ggroup: opciones repetidas o incompletas');
+        if (keys[q.correct] !== W.GYMNO.exById(m.ex).grp) bad.push('ggroup: la familia correcta no es la del estróbilo');
+      }
+      if (q.type === 'gflor') {
+        const right = q.opts[q.correct].key;
+        if (q.kind === 'stmt' && right !== W.GYMNO.TRAITS[q.trait].who) bad.push('gflor: respuesta del enunciado mal puesta');
+        if (q.kind === 'img' && right !== (q.flower ? 'flower' : 'strob')) bad.push('gflor: figura mal clasificada');
+      }
+    });
+  }
+  ok(!bad.length, `${nq} preguntas generadas (40 semillas × 3 niveles): opciones completas, sin repetir y con la correcta en su lugar`, [...new Set(bad)].slice(0, 20).join('<br>'));
+
+  sec('3. Calificación de la fórmula escrita');
+  const wrongSelf = [];
+  for (const level of ['basic', 'mid', 'adv']) for (const conv of ['classic', 'prenner']) {
+    QUIZ.flowersFor(level).forEach(x => {
+      const t = Formula.text(x.m, conv, conv === 'prenner' ? { bracts: true, ovules: true } : {});
+      const g = QUIZ.grade({ type: 'fwrite', target: x.m }, t, { level, conv });
+      if (g.score !== 1) wrongSelf.push(`${level}/${conv} ${x.sci || x.fam}: ${esc(t)} → ${Math.round(g.score * 100)} % ${g.checks.filter(c => !c.ok).map(c => c.what[0]).join(', ')}`);
+    });
+  }
+  ok(!wrongSelf.length, `Escribir la fórmula correcta de cada flor da 100 % (${QUIZ.flowers().length} flores, 3 niveles, 2 convenciones)`, wrongSelf.slice(0, 15).join('<br>'));
+  const tomato = W.SPECIMENS.find(s => s.id === 'solanum').flowers[0].m;
+  const g1 = QUIZ.grade({ type: 'fwrite', target: tomato }, '✱ K(5) C(5) A5 G̲(2)', { level: 'basic', conv: 'classic' });
+  const g2 = QUIZ.grade({ type: 'fwrite', target: tomato }, '✱ K(5) C(5) A5 G̲(2)', { level: 'mid', conv: 'classic' });
+  ok(g1.score === 1 && g2.score < 1 && g2.checks.some(c => !c.ok && /adnación/.test(c.what[0])), 'Jitomate sin corchetes: 100 % en básico; en intermedio falla solo la adnación', `${g1.score} / ${g2.score}`);
+  const lily = W.SPECIMENS.find(s => s.id === 'lilium').flowers[0].m;
+  const g3 = QUIZ.grade({ type: 'fwrite', target: lily }, '✱ K3 C3 A3+3 G̲(3)', { level: 'basic', conv: 'classic' });
+  ok(g3.score < 1 && g3.checks.some(c => !c.ok && /Perigonio/.test(c.what[0])) && g3.checks.some(c => !c.ok && /Cáliz/.test(c.what[0])), 'Azucena con cáliz y corola: falla el perigonio y sobran cáliz y corola', g3.checks.filter(c => !c.ok).map(c => c.what[0]).join(', '));
+  const g4 = QUIZ.grade({ type: 'fwrite', target: lily }, '✱ P6 A6 G̲(3)', { level: 'basic', conv: 'classic' });
+  const g5 = QUIZ.grade({ type: 'fwrite', target: lily }, '✱ P6 A6 G̲(3)', { level: 'mid', conv: 'classic' });
+  ok(g4.score === 1 && g5.score < 1, 'P6 en vez de P3+3: bien en básico, los verticilos cuentan desde intermedio');
+  const g6 = QUIZ.grade({ type: 'fwrite', target: tomato }, '✱ K(5) [C(5) A5] Ğ(2)', { level: 'mid', conv: 'classic' });
+  ok(g6.checks.filter(c => !c.ok).map(c => c.what[0]).join() === 'Posición del ovario', 'Ovario ínfero por súpero: solo falla la posición del ovario', g6.checks.filter(c => !c.ok).map(c => c.what[0]).join(', '));
+  const g7 = QUIZ.grade({ type: 'fwrite', target: tomato }, '', { level: 'basic', conv: 'classic' });
+  ok(g7.score === 0 && g7.empty, 'Una respuesta vacía vale cero');
+  /* every kind of change is caught by the grader */
+  const r = QUIZ.rng(4242), missed = [];
+  QUIZ.flowersFor('adv').slice(0, 120).forEach(x => {
+    QUIZ.mutants(x.m, 3, r, ['conn', 'count', 'pos', 'carp', 'gyn', 'sym', 'adn', 'per'], 'prenner').forEach(m => {
+      const g = QUIZ.grade({ type: 'fwrite', target: x.m }, Formula.text(m, 'prenner', {}), { level: 'adv', conv: 'prenner' });
+      if (g.score === 1) missed.push((x.sci || x.fam) + ': ' + esc(Formula.text(m, 'prenner', {})));
+    });
+  });
+  ok(!missed.length, 'Cada fórmula alterada (un cambio) baja la calificación: el calificador no deja pasar errores', missed.slice(0, 10).join('<br>'));
+  const missedC = [];
+  QUIZ.flowersFor('adv').slice(0, 120).forEach(x => {
+    QUIZ.mutants(x.m, 3, r, ['conn', 'count', 'pos', 'carp', 'gyn', 'sym', 'adn', 'per'], 'classic').forEach(m => {
+      /* adnation is graded from the intermediate level on */
+      const onlyAdn = JSON.stringify(Object.assign({}, W.FM.normalize(m), { adn: [] })) === JSON.stringify(Object.assign({}, W.FM.normalize(x.m), { adn: [] }));
+      for (const level of onlyAdn ? ['adv'] : ['basic', 'adv']) {
+        const g = QUIZ.grade({ type: 'fwrite', target: x.m }, Formula.text(m, 'classic', {}), { level, conv: 'classic' });
+        if (g.score === 1) missedC.push(level + ' ' + (x.sci || x.fam) + ': ' + esc(Formula.text(m, 'classic', {})));
+      }
+    });
+  });
+  ok(!missedC.length, 'Lo mismo con la fórmula clásica, en básico y en avanzado', missedC.slice(0, 10).join('<br>'));
+  const banana = QUIZ.flowers().find(x => x.fam === 'musaceae');
+  const gp = QUIZ.grade({ type: 'fwrite', target: banana.m }, Formula.text(banana.m, 'classic', {}), { level: 'adv', conv: 'prenner' });
+  ok(gp.score < 1, 'En un examen con la convención de Prenner, la fórmula clásica del plátano no alcanza el 100 % en avanzado (le faltan las piezas desiguales)', Math.round(gp.score * 100) + ' %');
+
+  sec('4. Códigos del examen y del comprobante');
+  const ecfg = { title: 'Parcial 1', types: ['fwrite', 'fpick', 'tdef'], n: 6, level: 'mid', conv: 'prenner', time: 20, reveal: 'marks', seed: 777 };
+  const code = QUIZ.examCode(ecfg), back = QUIZ.readExam(code);
+  ok(/^FPX\./.test(code) && back && back.seed === 777 && back.title === 'Parcial 1' && back.dv === QUIZ.dataVersion(), 'El código del examen guarda la configuración y la versión del catálogo');
+  ok(QUIZ.readExam(code.slice(0, -1) + (code.slice(-1) === '0' ? '1' : '0')) === null, 'Un código de examen alterado no se acepta');
+  ok(QUIZ.examId(back) === QUIZ.examId(Object.assign({}, ecfg, { dv: QUIZ.dataVersion() })), 'El identificador del examen es estable');
+  const qs = QUIZ.generate(back);
+  const answers = qs.map(q => q.type === 'fwrite' ? Formula.text(q.target, 'prenner', {}) : q.correct);
+  const res = { v: 1, cfg: back, name: 'Ana López', mat: '2026-001', att: 1, t0: 1, t1: 600001, ans: answers, pct: 100 };
+  const rc = QUIZ.resultCode(res), v = QUIZ.verify(rc);
+  ok(v.ok && v.pct === 100 && v.res.name === 'Ana López', 'Un comprobante legítimo se verifica: 100 %, nombre y examen');
+  const liar = QUIZ.resultCode(Object.assign({}, res, { ans: answers.map((x, i) => i === 0 ? '' : x), pct: 100 }));
+  const vl = QUIZ.verify(liar);
+  ok(!vl.ok && vl.intact && vl.pct < 100, 'Un comprobante que declara más de lo que sus respuestas valen no pasa (se recalifica)', `${vl.pct} %`);
+  const edited = rc.replace(/\.([0-9a-f]{8})$/, (m, h) => '.' + (h[0] === 'a' ? 'b' : 'a') + h.slice(1));
+  ok(!QUIZ.verify(edited).ok && !QUIZ.verify(edited).intact, 'Un código editado a mano se detecta');
+  ok(!QUIZ.verify('basura').ok, 'Un texto que no es código no se acepta');
+  const old = QUIZ.verify(QUIZ.resultCode(Object.assign({}, res, { cfg: Object.assign({}, back, { dv: 'g0.' + back.dv.split('.').slice(1).join('.') }) })));
+  ok(old.intact && !old.sameData && !old.ok, 'Un comprobante de otra versión del generador o del catálogo se marca aparte (no se recalifica con preguntas distintas)');
+}
+
+async function uiTests(W, D) {
+  const { QUIZ, Formula, B6, I18N } = W;
+  const $ = s => D.querySelector(s), $$ = s => [...D.querySelectorAll(s)];
+  const vis = n => n && W.getComputedStyle(n).display !== 'none';
+  const click = n => n.dispatchEvent(new W.MouseEvent('click', { bubbles: true }));
+  if (I18N.lang !== 'es') I18N.set('es');
+  sec('5. Práctica');
+  W.goStep(6);
+  B6.showTab('practice');
+  ok($('#panel-6').classList.contains('active') && !$('.step-btn[data-step="6"] .soon') && $$('#q6Home input[name="q6t"]').length === 10, 'El bloque 6 está listo; la práctica ofrece los diez tipos de pregunta');
+  B6.begin('practice', { types: ['fpick', 'fwrite', 'tname'], n: 6, level: 'basic', conv: 'classic', seed: 31337, reveal: 'full', time: 0 });
+  ok(vis($('#q6Run')) && /Pregunta 1 de 6/.test($('#q6Run .q-prog').textContent), 'La práctica empieza con 6 preguntas');
+  let rightCount = 0;
+  for (let k = 0; k < 6; k++) {
+    const q = B6.S.qs[B6.S.i];
+    if (q.type === 'fwrite') {
+      ok($('#q6F3d svg') && $$('#q6Run .q-pane.paper svg').length === 2, 'Escribe la fórmula: se ven la flor en 3D, el diagrama y el corte');
+      const inp = $('#q6Input');
+      inp.value = Formula.text(q.target, 'classic', {});
+      inp.dispatchEvent(new W.Event('input', { bubbles: true }));
+      ok(/La app lee/.test($('#q6Echo').textContent), 'Mientras escribe, la app muestra cómo lee la fórmula');
+      click($('[data-act="check"]'));
+      ok(/Correcto/.test($('#q6Fb .q-verdict').textContent) && $$('#q6Fb .q-checks tr').length > 3, 'La fórmula correcta se califica 100 % y se muestra la revisión pieza por pieza');
+    } else {
+      click($(`.q-opt[data-k="${q.correct}"]`));
+      ok($('.q-opt.right') && /Correcto/.test($('#q6Fb').textContent), `${q.type}: la respuesta correcta se marca en verde y se explica`);
+    }
+    rightCount++;
+    const next = $('[data-act="next"]') || $('[data-act="finish"]');
+    click(next);
+  }
+  ok(vis($('#q6End')) && /100 %/.test($('#q6End .q-big').textContent), 'Al final: 100 % con todo correcto');
+  click($('[data-act="again"]'));
+  ok(vis($('#q6Run')) && B6.S.cfg.seed !== 31337, '«Otra ronda» genera preguntas nuevas');
+  const q0 = B6.S.qs[0];
+  if (q0.type !== 'fwrite') {
+    const wrongK = (q0.correct + 1) % q0.opts.length;
+    click($(`.q-opt[data-k="${wrongK}"]`));
+    ok($('.q-opt.wrong') && $('.q-opt.right') && /Incorrecto/.test($('#q6Fb').textContent), 'Una respuesta equivocada se marca en rojo y se muestra la correcta');
+  } else {
+    const inp = $('#q6Input');
+    inp.value = '✱ K1 C1';
+    inp.dispatchEvent(new W.Event('input', { bubbles: true }));
+    click($('[data-act="check"]'));
+    ok(!/¡Correcto!/.test($('#q6Fb').textContent) && $('#q6Fb .q-checks tr.bad') && /Fórmula correcta/.test($('#q6Fb').textContent), 'Una respuesta equivocada se marca en rojo y se muestra la correcta');
+  }
+  B6.begin('practice', { types: ['fdiag'], n: 2, level: 'mid', conv: 'classic', seed: 8080, reveal: 'full', time: 0 });
+  { const q = B6.S.qs[0], wk = (q.correct + 1) % 4, d = QUIZ.compare(q.flower.m, q.opts[wk].m, 'adv').checks.filter(c => !c.ok);
+    click($(`.q-opt[data-k="${wk}"]`));
+    ok($('#q6Fb .q-why') && d.length && $('#q6Fb .q-why').textContent.includes(d[0].yours[0]), 'Si elige un diagrama equivocado, se explica en qué difiere de la flor', $('#q6Fb .q-why') ? $('#q6Fb .q-why').textContent : ''); }
+  B6.begin('practice', { types: ['tname'], n: 2, level: 'mid', conv: 'classic', seed: 8081, reveal: 'full', time: 0 });
+  { const q = B6.S.qs[0], wk = (q.correct + 1) % 4;
+    click($(`.q-opt[data-k="${wk}"]`));
+    ok(/Lo que elegiste/.test($('#q6Fb').textContent) && $('#q6Fb').textContent.includes(q.opts[wk].plate.d[0]), 'Si elige un nombre equivocado, se muestra qué significa ese otro término'); }
+  click($('[data-act="quit"]'));
+  ok(vis($('#q6Home')), '«Salir» vuelve a las opciones');
+
+  sec('6. Examen del profesor al estudiante');
+  B6.showTab('teacher');
+  ok(vis($('#q6Teacher')) && $('[data-act="make"]'), 'El panel del profesor abre');
+  $('#q6TTitle').value = 'Parcial de prueba';
+  $('#q6TN').value = '5';
+  $$('#q6Teacher input[name="q6tt"]').forEach(i => { i.checked = ['fread', 'fwrite', 'tdef'].includes(i.value); });
+  click($('#q6Teacher [data-act="make"]'));
+  const link = $('#q6TLink').value, ecode = $('#q6TCode').value;
+  ok(/#b6&ex=FPX\./.test(link) && QUIZ.readExam(ecode).title === 'Parcial de prueba' && QUIZ.readExam(ecode).n === 5, 'Crear el examen da un enlace y un código con esa configuración');
+  click($('#q6Teacher [data-act="keylist"]'));
+  ok($$('#q6TKey tr').length === 5, 'La clave de respuestas lista las 5 preguntas');
+  W.location.hash = '#b6&ex=' + ecode;
+  await wait(200);
+  ok(vis($('#q6Run')) && $('.q-intro') && /Parcial de prueba/.test($('.q-intro').textContent), 'El enlace abre la portada del examen');
+  click($('[data-act="startexam"]'));
+  ok(/nombre/.test($('#q6ExIntroMsg').textContent), 'Sin nombre no empieza');
+  $('#q6Name').value = 'Estudiante Prueba'; $('#q6Mat').value = 'A-123';
+  click($('[data-act="startexam"]'));
+  ok($('.q-dots') && $$('.q-dot').length === 5 && !$('#q6Fb .q-verdict'), 'Durante el examen hay navegación por número y no se muestra si acierta');
+  const cfg = B6.S.cfg;
+  for (let k = 0; k < 5; k++) {
+    const q = B6.S.qs[k];
+    if (q.type === 'fwrite') { const inp = $('#q6Input'); inp.value = Formula.text(q.target, cfg.conv, {}); inp.dispatchEvent(new W.Event('input', { bubbles: true })); }
+    else click($(`.q-opt[data-k="${q.correct}"]`));
+    ok(!$('#q6Fb .q-verdict'), `Pregunta ${k + 1}: sin retroalimentación en el examen`);
+    if (k < 4) click($('[data-act="next"]'));
+  }
+  const saved = JSON.parse(W.localStorage.getItem('floralpro:q6:' + QUIZ.examId(cfg)));
+  ok(saved && saved.ans.filter(a => a != null && a !== '').length === 5 && !saved.done, 'Las respuestas se guardan en el navegador mientras avanza');
+  click($('[data-act="finish"]'));
+  ok(/Respondiste todas/.test($('#q6Fb').textContent), 'Antes de entregar, revisa si falta alguna');
+  click($('[data-act="handin"]'));
+  const certCode = $('#q6End .q-code').value;
+  ok(vis($('#q6End')) && /^FP6\./.test(certCode) && /100 %/.test($('#q6End').textContent), 'Al entregar: comprobante con código y 100 %');
+  const file = B6.certificateFile();
+  ok(/Estudiante Prueba/.test(file) && file.includes(certCode) && /A-123/.test(file), 'El archivo del comprobante tiene nombre, matrícula y código');
+  B6.showTab('teacher');
+  $('#q6VCodes').value = 'basura\n' + certCode + '\n' + certCode;
+  click($('#q6Teacher [data-act="verify"]'));
+  const rows = $$('#q6VOut tr').slice(1);
+  ok(rows.length === 1 && /Estudiante Prueba/.test(rows[0].textContent) && /100 %/.test(rows[0].textContent) && /válido/.test(rows[0].textContent), 'El profesor verifica el comprobante: válido, 100 % (los repetidos cuentan una vez)');
+  B6.openExam(cfg);
+  ok($('[data-act="showcert"]') && /Ya entregaste/.test($('.q-intro').textContent), 'Si vuelve a abrir el examen, ve que ya lo entregó y puede recuperar su comprobante');
+  click($('[data-act="showcert"]'));
+  ok($('#q6End .q-code').value === certCode, 'Recupera el mismo comprobante');
+
+  sec('7. Tiempo límite y reanudar');
+  const tcfg = Object.assign({}, cfg, { time: 1, seed: 4040, title: 'Con tiempo' });
+  B6.openExam(tcfg);
+  $('#q6Name').value = 'Otra Persona';
+  click($('[data-act="startexam"]'));
+  click($(`.q-opt[data-k="0"]`) || $('#q6Input'));
+  click($('[data-act="quit"]'));
+  B6.openExam(tcfg);
+  ok($('[data-act="resume"]'), 'Un examen a medias se puede continuar');
+  click($('[data-act="resume"]'));
+  ok(B6.S.name === 'Otra Persona' && vis($('#q6Run .q-card')), 'Al continuar conserva el nombre y las respuestas');
+  B6.S.t0 = Date.now() - 61000;
+  await wait(1300);
+  ok(vis($('#q6End')), 'Al acabarse el tiempo, el examen se entrega solo');
+
+  sec('8. Idioma y teléfono');
+  I18N.set('en');
+  B6.showTab('practice');
+  ok(/Practise/.test($('#q6Home').textContent) && /Write the formula/.test($('#q6Home').textContent), 'En inglés');
+  I18N.set('es');
+  const fr = document.createElement('iframe');
+  fr.style.cssText = 'width:390px;height:800px';
+  document.body.appendChild(fr);
+  fr.src = '../index.html?w=q6#b6';
+  await new Promise(r => { fr.onload = r; });
+  await wait(500);
+  fr.contentWindow.B6.begin('practice', { types: ['fwrite', 'fdiag'], n: 2, level: 'basic', conv: 'classic', seed: 5, reveal: 'full', time: 0 });
+  await wait(300);
+  const M = fr.contentWindow.document;
+  const over = M.documentElement.scrollWidth - M.documentElement.clientWidth;
+  ok(over <= 0, 'Sin desbordamiento horizontal a 390 px durante una pregunta', over > 0 ? over + ' px' : '');
+  fr.remove();
+}
+
+function report() {
+  const bad = results.filter(r => !r.pass), n = results.filter(r => !r.info).length;
+  const sum = document.getElementById('sum');
+  sum.innerHTML = bad.length ? `<span class="bad">${bad.length} de ${n} pruebas fallan</span>` : `<span class="ok">Las ${n} pruebas pasan</span>`;
+  sum.dataset.pass = n - bad.length; sum.dataset.fail = bad.length;
+  let h = '', cur = null;
+  results.forEach(r => {
+    if (r.section !== cur) { if (cur !== null) h += '</table>'; h += `<h2>${r.section}</h2><table>`; cur = r.section; }
+    h += `<tr><td class="r ${r.info ? '' : r.pass ? 'ok' : 'bad'}">${r.info ? 'i' : r.pass ? '✓' : '✗'}</td><td>${r.name}${r.detail ? `<div class="note">${r.detail}</div>` : ''}</td></tr>`;
+  });
+  document.getElementById('out').innerHTML = h + '</table>';
+}
+</script>
+</body>
+</html>

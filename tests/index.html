@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>FloralPro — pruebas del motor</title>
+<link rel="stylesheet" href="../css/labg-base.css">
+<link rel="stylesheet" href="../css/style.css">
+<style>
+  body { padding: 18px; max-width: 1100px; margin: 0 auto; }
+  .sum { font-size: 1.2rem; font-weight: 700; margin: 8px 0 14px; }
+  .ok { color: var(--success); } .bad { color: var(--danger); }
+  table { width: 100%; border-collapse: collapse; font-size: .82rem; }
+  td { border-bottom: 1px solid var(--border); padding: 3px 6px; vertical-align: top; }
+  td.r { width: 26px; text-align: center; font-weight: 700; }
+  code { font-family: var(--mono); font-size: .78rem; }
+  h2 { font-size: 1rem; margin: 18px 0 4px; }
+</style>
+</head>
+<body>
+<h1>FloralPro — pruebas del motor</h1>
+<p class="hint">Las fórmulas esperadas se escribieron a mano a partir de las convenciones de los libros de texto (clásica) y de Prenner et al. (2010), sin usar el código de la app.</p>
+<div class="sum" id="sum"></div>
+<div id="out"></div>
+<script src="../js/i18n.js"></script>
+<script src="../js/model.js"></script>
+<script src="../js/formula.js"></script>
+<script src="../js/diagram.js"></script>
+<script src="../js/section.js"></script>
+<script src="../js/flower3d.js"></script>
+<script src="../js/specimens.js"></script>
+<script>
+const results = [];
+let section = '';
+function sec(name) { section = name; }
+function ok(cond, name, detail) { results.push({ section, pass: !!cond, name, detail: detail || '' }); }
+function eq(a, b, name) { ok(a === b, name, a === b ? '' : `obtenido <code>${esc(a)}</code><br>esperado <code>${esc(b)}</code>`); }
+function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+const U = s => [...s].map(c => c + '̲').join(''), O = s => [...s].map(c => c + '̅').join('');
+const GL = 'G̲';
+const FL = {};
+SPECIMENS.forEach(sp => sp.flowers.forEach((fl, i) => { FL[sp.id + (sp.flowers.length > 1 ? i : '')] = fl.m; }));
+const PO = { bracts: true, ovules: true };
+
+/* ---------- 1. formulae, classic convention ---------- */
+sec('1. Fórmula clásica (esperada escrita a mano)');
+const EXP_C = {
+  lilium: `✱ ⚥ P3+3 A3+3 G${U('(3)')}`,
+  solanum: `✱ ⚥ K(5) [C(5) A5] G${U('(2)')}`,
+  phaseolus: `↑ ⚥ K(5) C1+2+(2) A(9)+1 G${U('1')}`,
+  salvia: `↑ ⚥ K(5) [C(5) A2+2°] G${U('(2)')}`,
+  cucurbita0: `✱ ♂ K(5) C(5) A(3)`,
+  cucurbita1: `✱ ♀ K(5) C(5) G${O('(3)')}`,
+  helianthus: `✱ ⚥ K2 [C(5) A(5)] G${O('(2)')}`,
+  vanilla: `↑ ⚥ P3+3 [A1 G${O('(3)')}]`,
+  prunus: `✱ ⚥ K5 C5 A20–30 G${U('1')}`,
+  brassica: `✱ ⚥ K2+2 C4 A2+4 G${U('(2)')}`,
+  magnolia: `✱ ⚥ P3+3+3 A∞ G${U('∞')}`,
+  opuntia: `✱ ⚥ P∞ A∞ G${O('(5–10)')}`,
+  gossypium: `✱ ⚥ E3 K(5) [C5 A(∞)] G${U('(3–5)')}`,
+};
+for (const k in EXP_C) eq(Formula.text(FL[k], 'classic'), EXP_C[k], k);
+
+/* ---------- 2. formulae, Prenner et al. (2010) ---------- */
+sec('2. Fórmula de Prenner et al. (2010) con brácteas y óvulos (esperada escrita a mano)');
+const EXP_P = {
+  lilium: `* B Bt1 P3+3 A3+3 ${GL}(3) Vx∞`,
+  solanum: `* K(5) [C(5) A5] ${GL}(2) Vx∞`,
+  phaseolus: `↓ B Bt2 K(5) C1:2:(2) A1:(9) ${GL}1`,
+  salvia: `↓ B K(3:2) [C(2:3) A1⁰:2ʳ:2] ${GL}(2) Vx4`,
+  cucurbita0: `* ♂ K(5) C(5) A(3)`,
+  cucurbita1: `* ♀ K(5) C(5) Ğ(3) Vp∞`,
+  helianthus: `* K2 [C(5) A(5)] Ğ(2) Vb1`,
+  vanilla: `↓ B P3+1:2 [A1 Ğ(3)] Vp∞`,
+  prunus: `* K5 C5 A20–30 ${GL}1 Vm2`,
+  brassica: `┼ K2+2 C4 A2+4 ${GL}(2) Vp∞`,
+  magnolia: `* P3+3+3 A∞ ${GL}∞ Vm2`,
+  opuntia: `* P∞ A∞ Ğ(5–10) Vp∞`,
+  gossypium: `* E3 K(5) [C5 A(∞)] ${GL}(3–5) Vx∞`,
+};
+for (const k in EXP_P) eq(Formula.text(FL[k], 'prenner', PO), EXP_P[k], k);
+
+/* ---------- 3. round trip: write → read → write ---------- */
+sec('3. Ida y vuelta: la fórmula escrita se vuelve a leer y a escribir igual');
+for (const k in FL) {
+  for (const conv of ['classic', 'prenner']) {
+    const o = conv === 'prenner' ? PO : {};
+    const t1 = Formula.text(FL[k], conv, o);
+    const r = Formula.parse(t1);
+    const t2 = Formula.text(r.model, conv, o);
+    eq(t2, t1, `${k} (${conv})`);
+    ok(r.warnings.length === 0, `${k} (${conv}) sin avisos al leer`, r.warnings.join('; '));
+  }
+}
+
+/* ---------- 4. reading formulae typed as in the literature ---------- */
+sec('4. Lectura de fórmulas escritas como en la literatura');
+{
+  /* Anagallis arvensis, Ronse De Craene (2010) */
+  const r = Formula.parse('✶ K5 [C(5) A5] G̲(5)').model, f = FM.normalize(r);
+  ok(f.sym === 'actino' && FM.total(f.K) === 5 && !FM.allConnate(f.K) && FM.allConnate(f.C) && FM.adnate(f, 'C', 'A') && f.G.pos === 'superior' && FM.total(f.G) === 5 && FM.gynSyncarpous(f.G), 'Anagallis: ✶ K5 [C(5) A5] G̲(5)');
+}
+{
+  /* Tamarindus indica, Prenner et al. (2010: 246) */
+  const r = Formula.parse('B Btᶜ K3:(2)ᶜ↓ C3:2ʳ↓ A(3):2ʳ↓+4ʳ:1⁰ G̲1↓ Vm8–10');
+  const f = FM.normalize(r.model);
+  ok(r.warnings.length === 0, 'Tamarindus: sin avisos', r.warnings.join('; '));
+  ok(f.B === 1 && f.Bt === 2, 'Tamarindus: bráctea y par de bractéolas');
+  ok(f.K.like === 'C' && f.K.w[0].parts.length === 2 && f.K.w[0].parts[1].connate && f.K.sym === 'zygo', 'Tamarindus: cáliz 3:(2) petaloide y zigomorfo');
+  ok(f.C.w[0].parts[1].state === 'sterile' && FM.total(f.C) === 5, 'Tamarindus: corola 3:2ʳ (dos pétalos reducidos)');
+  ok(f.A.w.length === 2 && f.A.w[0].parts[0].connate && f.A.w[0].parts[1].state === 'sterile' && f.A.w[1].parts[1].state === 'lost', 'Tamarindus: androceo (3):2ʳ + 4ʳ:1⁰');
+  ok(FM.total(f.A, { fertile: true }) === 3 && FM.total(f.A, { visible: true }) === 9, 'Tamarindus: 3 estambres fértiles y 9 piezas visibles');
+  ok(f.G.plac === 'marginal' && FM.cmin(f.G.ov) === 8 && FM.cmax(f.G.ov) === 10 && f.G.pos === 'superior', 'Tamarindus: G̲1, placentación marginal, 8–10 óvulos');
+}
+{
+  const f = FM.normalize(Formula.parse('✱ P(3+3) A3+3 G(3)').model);
+  ok(f.P.connate && FM.total(f.P) === 6 && FM.perianthType(f) === 'homo', 'Perigonio unido en tubo: P(3+3)');
+}
+{
+  const f = FM.normalize(Formula.parse('* K5 C5 A10 -G-(2)').model);
+  ok(f.G.pos === 'half' && FM.gynSyncarpous(f.G), 'Ovario semiínfero: -G-(2)');
+}
+{
+  const f = FM.normalize(Formula.parse('✱ K₅ C₍₅₎ A₅ G₍₂₎ inf').model);
+  ok(FM.total(f.K) === 5 && FM.allConnate(f.C) && f.G.pos === 'inferior', 'Subíndices y la palabra «inf»');
+}
+{
+  const f = FM.normalize(Formula.parse('✱ K(5) C(5) A5 G(̅2̅)̅').model);
+  ok(f.G.pos === 'inferior', 'Raya sobre el número de carpelos = ínfero');
+}
+{
+  const f = FM.normalize(Formula.parse('✱ E3 K(5) C5 A5² G(5)').model);
+  ok(f.A.w[0].fasc && f.A.w[0].fasc.g === 5 && f.A.w[0].fasc.per === 2 && FM.androeciumType(f).fusion === 'poly', 'Haces de estambres: A5² (5 grupos de 2)');
+}
+{
+  /* a range of stamens per bundle, as in citrus; found by the Block 4 catalogue */
+  const r = Formula.parse('* K(5) C5 A5⁴⁻⁸ G̲(8–15)'), f = FM.normalize(r.model);
+  const per = f.A.w[0].fasc && f.A.w[0].fasc.per;
+  ok(!r.warnings.length && f.A.w[0].fasc.g === 5 && Array.isArray(per) && per[0] === 4 && per[1] === 8, 'Haces con un rango de estambres: A5⁴⁻⁸ (5 grupos de 4 a 8)', r.warnings.join('; '));
+  const r2 = Formula.parse('* K5 C5 A3³⁻^∞ G̲(3)'), per2 = FM.normalize(r2.model).A.w[0].fasc.per;
+  ok(!r2.warnings.length && per2[0] === 3 && per2[1] === Infinity, 'Haces de «3 a muchos» estambres: A3³⁻^∞', r2.warnings.join('; '));
+}
+{
+  const r = Formula.parse('✱ K5 C5 X7 G(3');
+  ok(r.warnings.length >= 1, 'Una fórmula con errores produce avisos', r.warnings.join('; '));
+}
+
+/* ---------- 4b. faults found by the independent review of the Block 4 catalogue ---------- */
+sec('4b. Fallos que encontró la revisión del catálogo (Bloque 4)');
+{
+  const d = (m, lang) => FM.describe(m, lang || 'es').map(x => x.html.replace(/<[^>]+>/g, '')).join(' ');
+  /* bundles: the description counts stamens, not bundles */
+  const citrus = { sym: 'actino', K: { w: [{ n: 5, connate: true }] }, C: { w: [5] }, A: { w: [{ n: 5, fasc: { g: 5, per: [4, 8] } }] }, G: { w: [{ n: 10, connate: true }], plac: 'axile' } };
+  const tc = FM.total(FM.normalize(citrus).A);
+  ok(tc[0] === 20 && tc[1] === 40 && /20–40 estambres/.test(d(citrus)) && /poliadelfo/.test(d(citrus)) && !/isostémono/.test(d(citrus)), 'Naranja A5⁴⁻⁸: «20–40 estambres, poliadelfo», no «cinco estambres isostémonos»', d(citrus));
+  const ric = Formula.parse('✱ ♂ P5 A5–10×(∞)');
+  ok(!ric.warnings.length && FM.normalize(ric.model).A.w[0].fasc.per === Infinity, 'La forma clásica de haces A5–10×(∞) se lee', ric.warnings.join('; '));
+  /* a sterile gynoecium is a pistillode, not an ovary */
+  const papaya = { sym: 'actino', sex: 'staminate', K: { w: [{ n: 5, connate: true }] }, C: { w: [{ n: 5, connate: true }] }, A: { w: [5, 5] }, G: { w: [{ n: 5, connate: true, state: 'sterile' }] }, adn: [['C', 'A']] };
+  ok(/Pistilodio/.test(d(papaya)) && !/placentación/.test(d(papaya)), 'Flor estaminada de la papaya: «pistilodio», sin ovario ni placentación', d(papaya));
+  /* staminodes next to numerous stamens */
+  const aquilegia = { sym: 'actino', K: { w: [5], like: 'C' }, C: { w: [5] }, A: { w: [{ n: '∞' }, { n: 10, state: 'sterile' }] }, G: { w: [5] } };
+  ok(/numerosos estambres y diez estaminodios/.test(d(aquilegia)), 'Aguileña: «numerosos estambres y diez estaminodios» (∞ − ∞ no los borra)', d(aquilegia));
+  const ebano = { sym: 'actino', sex: 'pistillate', K: { w: [{ n: 4, connate: true }] }, C: { w: [{ n: 4, connate: true }] }, A: { w: [{ n: 8, state: 'sterile' }] }, G: { w: [{ n: 4, connate: true }], plac: 'axile' } };
+  ok(/reducido a ocho estaminodios/.test(d(ebano)), 'Flor pistilada con solo estaminodios: «androceo reducido a ocho estaminodios»', d(ebano));
+  /* one whorl of tepals: "opposite the tepals", not "the inner tepals" */
+  const amaranto = { sym: 'actino', P: { w: [5], like: 'K' }, A: { w: [{ n: 5, opp: true }] }, G: { w: [{ n: 2, connate: true }], plac: 'basal', loc: 1, ov: 1 } };
+  ok(/opuestos a los tépalos\)/.test(d(amaranto)) && !/internos/.test(d(amaranto)), 'Un solo verticilo de tépalos: «opuestos a los tépalos»', d(amaranto));
+  const iris = { sym: 'actino', P: { w: [3, 3], like: 'C' }, A: { w: [3] }, G: { w: [{ n: 3, connate: true }], pos: 'inferior', plac: 'axile' } };
+  ok(/frente a los tépalos externos/.test(d(iris)), 'Iridáceas: tres estambres «frente a los tépalos externos»', d(iris));
+  /* fused staminodes are not a bundle of stamens */
+  const jengibre = { sym: 'zygo', K: { w: [{ n: 3, connate: true }] }, C: { w: [{ n: 3, connate: true }] }, A: { w: [{ parts: [{ n: 2, state: 'sterile' }, { n: 1, state: 'lost' }] }, { parts: [{ n: 1 }, { n: 2, state: 'sterile', connate: true, label: { es: 'labelo', en: 'labellum' } }] }] }, G: { w: [{ n: 3, connate: true }], pos: 'inferior', plac: 'axile' } };
+  ok(!/diadelfo/.test(d(jengibre)) && FM.androeciumType(FM.normalize(jengibre)).fusion === 'free', 'Jengibre: el labelo (estaminodios unidos) no hace «diadelfo» al androceo', d(jengibre));
+  /* groups without a name are not left blank */
+  const orq = { sym: 'zygo', P: { w: [3, { parts: [{ n: 1, label: { es: 'labelo', en: 'lip' } }, { n: 2 }] }], like: 'C' }, A: { w: [1] }, G: { w: [{ n: 3, connate: true }], pos: 'inferior', plac: 'parietal' }, adn: [['A', 'G']] };
+  ok(!/,\s+\(/.test(d(orq)) && /los demás \(2\)/.test(d(orq)), 'Piezas sin nombre: «labelo (1), los demás (2)», no «labelo (1), (2)»', d(orq));
+  ok(!/filamentos libres/.test(d(orq)), 'Con ginostemio no se dice «filamentos libres»', d(orq));
+  /* Lobelia: anthers and filaments united */
+  const lobelia = { sym: 'zygo', K: { w: [5] }, C: { w: [{ connate: true, parts: [{ n: 3 }, { n: 2 }] }] }, A: { w: [{ n: 5, connate: true }] }, G: { w: [{ n: 2, connate: true }], pos: 'inferior', plac: 'axile' }, look: { synanther: true, filTube: true } };
+  ok(/anteras y filamentos unidos/.test(d(lobelia)), 'Lobelia: anteras y filamentos unidos en un tubo', d(lobelia));
+  /* free ovaries with united styles: ovaries, per carpel */
+  const palma = { sym: 'actino', K: { w: [{ n: 3, connate: true }] }, C: { w: [{ n: 3, connate: true }] }, A: { w: [3, 3] }, G: { w: [{ n: 3, connate: 'apical' }], plac: 'basal', ov: 1 }, adn: [['C', 'A']] };
+  ok(/ovarios súperos/.test(d(palma)) && /por carpelo/.test(d(palma)) && !/trilocular/.test(d(palma)), 'Carpelos libres con estilos unidos: «ovarios súperos», óvulos «por carpelo»', d(palma));
+  /* twice as many stamens in one whorl is not diplostemony */
+  const rumex = { sym: 'actino', P: { w: [3, 3], like: 'K' }, A: { w: [{ n: 6, ang: [170, 190, 50, 70, 290, 310] }] }, G: { w: [{ n: 3, connate: true }], plac: 'basal', loc: 1, ov: 1 } };
+  ok(!/diplostémono/.test(d(rumex)) && /en un solo verticilo/.test(d(rumex)), 'Rumex: seis estambres en un solo verticilo no son «diplostémonos»', d(rumex));
+  /* a corona inside a perigon */
+  const narciso = { sym: 'actino', P: { w: [3, 3], connate: true, like: 'C' }, corona: { n: 60, color: '#f2c12e' }, A: { w: [3, 3] }, G: { w: [{ n: 3, connate: true }], pos: 'inferior', plac: 'axile' } };
+  ok(/Entre los tépalos y los estambres/.test(d(narciso)), 'Narciso: la corona está «entre los tépalos y los estambres»', d(narciso));
+}
+
+/* ---------- 5. the diagram draws what the model says ---------- */
+sec('5. El diagrama dibuja exactamente las piezas del modelo');
+for (const k in FL) {
+  const f = FM.normalize(FL[k]);
+  const c = Diagram.census(f).counts;
+  for (const o of ['E', 'K', 'C', 'P', 'A']) if (f[o]) {
+    const exp = f[o].w.reduce((s, w) => s + FM.ctyp(w.n), 0);
+    eq(c[o] || 0, exp, `${k}: ${o} tiene ${exp} piezas en el diagrama`);
+  }
+  const svg = Diagram.svg(f);
+  ok(/^<svg[\s\S]*<\/svg>$/.test(svg) && !/NaN|undefined/.test(svg), `${k}: SVG del diagrama válido, sin NaN`);
+  const sec2 = Section.svg(f);
+  ok(!/NaN|undefined/.test(sec2), `${k}: SVG del corte sin NaN`);
+  const sc = Flower3D.build(f, { explode: 1 });
+  ok(sc.prims.length > 5 && sc.prims.every(p => (p.pts || [p.c]).every(q => q.every(Number.isFinite))), `${k}: flor 3D con coordenadas finitas`);
+}
+
+/* ---------- 6. positions of the organs ---------- */
+sec('6. Posición de las piezas (0° = adaxial, junto al eje)');
+const ring = (k, org, wi) => Diagram.census(FL[k]).rings.find(r => r.org === org && r.wi === (wi || 0));
+const has = (arr, list) => list.every(a => arr.some(b => Math.abs(((b - a) % 360 + 540) % 360 - 180) < 0.6));
+const angOfPart = (r, p) => r.angles.filter((a, i) => r.parts[i] === p);
+{
+  const K = ring('solanum', 'K'), C = ring('solanum', 'C'), A = ring('solanum', 'A');
+  ok(has(K.angles, [0, 72, 144, 216, 288]), 'Jitomate: sépalo impar adaxial', K.angles.join(', '));
+  ok(has(C.angles, [36, 108, 180, 252, 324]), 'Jitomate: pétalos alternos a los sépalos', C.angles.join(', '));
+  ok(has(A.angles, K.angles), 'Jitomate: estambres alternos a los pétalos (frente a los sépalos)', A.angles.join(', '));
+}
+{
+  const K = ring('phaseolus', 'K'), C = ring('phaseolus', 'C'), A = ring('phaseolus', 'A');
+  ok(has(K.angles, [180]), 'Frijol: sépalo impar abaxial', K.angles.join(', '));
+  ok(has(angOfPart(C, 0), [0]), 'Frijol: estandarte adaxial');
+  ok(has(angOfPart(C, 1), [72, 288]), 'Frijol: alas laterales');
+  ok(has(angOfPart(C, 2), [144, 216]), 'Frijol: quilla abaxial');
+  ok(has(angOfPart(A, 1), [0]), 'Frijol: estambre libre (vexilar) frente al estandarte');
+}
+{
+  const C = ring('salvia', 'C'), A = ring('salvia', 'A');
+  ok(has(angOfPart(C, 0), [36, 324]), 'Chía: labio superior de dos pétalos adaxiales');
+  ok(has(angOfPart(A, 0), [144, 216]), 'Chía: los dos estambres fértiles son los anteriores');
+  ok(has(angOfPart(A, 2), [0]), 'Chía: el estambre perdido es el posterior (adaxial)');
+}
+{
+  const K0 = ring('brassica', 'K', 0), K1 = ring('brassica', 'K', 1), C = ring('brassica', 'C');
+  ok(has(K0.angles, [0, 180]) && has(K1.angles, [90, 270]), 'Col: sépalos externos medianos, internos laterales');
+  ok(has(C.angles, [45, 135, 225, 315]), 'Col: pétalos diagonales (en cruz)');
+}
+{
+  const P0 = ring('lilium', 'P', 0), P1 = ring('lilium', 'P', 1), A0 = ring('lilium', 'A', 0), A1 = ring('lilium', 'A', 1);
+  ok(has(P0.angles, [180, 300, 60]), 'Azucena: tépalo externo impar abaxial');
+  ok(has(P1.angles, [0, 120, 240]), 'Azucena: tépalos internos alternos');
+  ok(has(A0.angles, P0.angles) && has(A1.angles, P1.angles), 'Azucena: cada verticilo de estambres frente a un verticilo de tépalos');
+}
+{
+  const P1 = ring('vanilla', 'P', 1), A = ring('vanilla', 'A');
+  ok(has(angOfPart(P1, 0), [0]), 'Vainilla: labelo adaxial antes de la resupinación');
+  ok(has(A.angles, [180]), 'Vainilla: el estambre fértil frente al sépalo mediano');
+}
+
+/* ---------- 7. description in words ---------- */
+sec('7. Descripción en palabras');
+const D = k => FM.describe(FL[k], 'es').map(x => x.html.replace(/<[^>]+>/g, '')).join(' ').toLowerCase();
+const words = {
+  lilium: ['actinomorfa', 'trímera', 'homoclamídeo', 'diplostémono', 'súpero', 'trilocular', 'axilar'],
+  solanum: ['pentámera', 'gamosépalo', 'gamopétala', 'rotácea', 'epipétalos', 'isostémono', 'bilocular'],
+  phaseolus: ['zigomorfa', 'papilionácea', 'vexilar', 'diadelfo', 'diplostémono', 'monocarpelar', 'marginal'],
+  salvia: ['bilabiada', 'estaminodios', 'ginobásico', 'falsos tabiques', 'tetralocular', 'disco'],
+  cucurbita0: ['estaminada', 'sin gineceo'],
+  cucurbita1: ['pistilada', 'epígina', 'ínfero', 'parietal'],
+  helianthus: ['pentámera', 'sinantéreo', 'epipétalos', 'ínfero', 'basal', 'vilano'],
+  vanilla: ['zigomorfa', 'resupinada', 'labelo', 'ginostemio', 'ínfero', 'parietal'],
+  prunus: ['perígina', 'hipanto', 'polistémono', 'monocarpelar', 'dos óvulos'],
+  brassica: ['disimétrica', 'tetrámera', 'cruciforme', 'tetradínamo', 'réplum', 'parietal'],
+  magnolia: ['trímera', 'apocárpico', 'polistémono'],
+  opuntia: ['epígina', 'ínfero', 'parietal', 'polistémono'],
+  gossypium: ['epicáliz', 'contorta', 'monadelfo', 'monotecas', 'epipétalos'],
+};
+for (const k in words) { const d = D(k); for (const w of words[k]) ok(d.includes(w), `${k}: «${w}»`, d.includes(w) ? '' : d); }
+ok(!D('helianthus').includes('dímera'), 'girasol: no se declara dímero por el vilano de dos escamas');
+ok(!D('lilium').includes('pétalos;'), 'azucena: compara con tépalos, no con pétalos');
+
+/* ---------- 8. random flowers (fuzzing) ---------- */
+sec('8. Flores al azar: 600 modelos generados con semilla fija');
+{
+  let a = 0x9e3779b9, b = 0x243f6a88, c = 0xb7e15162, d = 20260919;
+  const r = () => { a >>>= 0; b >>>= 0; c >>>= 0; d >>>= 0; let t = (a + b) | 0; a = b ^ (b >>> 9); b = (c + (c << 3)) | 0; c = (c << 21) | (c >>> 11); d = (d + 1) | 0; t = (t + d) | 0; c = (c + t) | 0; return (t >>> 0) / 4294967296; };
+  const I = n => Math.floor(r() * n);
+  const pick = arr => arr[I(arr.length)];
+  const cnt = (min) => { const t = r(); if (t < 0.08) return '∞'; if (t < 0.16) { const x = (min || 1) + I(4); return [x, x + 1 + I(3)]; } return (min || 1) + I(8); };
+  const whorl = (allowParts, states) => {
+    if (allowParts && r() < 0.3) {
+      const np = 2 + I(2);
+      return { connate: r() < 0.3, parts: Array.from({ length: np }, () => ({ n: 1 + I(3), connate: r() < 0.3, state: states ? pick(['fertile', 'fertile', 'sterile', 'lost']) : 'fertile' })), from: r() < 0.3 ? 'abaxial' : undefined };
+    }
+    return { n: cnt(), connate: r() < 0.4, state: states ? pick(['fertile', 'fertile', 'fertile', 'sterile', 'lost']) : 'fertile', opp: r() < 0.2 };
+  };
+  const organ = (maxW, parts, states) => ({ w: Array.from({ length: 1 + I(maxW) }, () => whorl(parts, states)), connate: r() < 0.1, aest: pick([undefined, 'valvate', 'imbricate', 'quincuncial', 'contort', 'vexillary', 'carinal', 'open']) });
+  let bad = 0, rtBad = 0, clBad = 0;
+  const fails = [];
+  for (let t = 0; t < 600; t++) {
+    const m = { sym: pick(['actino', 'zygo', 'zygoT', 'zygoO', 'disym', 'asym', 'spiral']), sex: pick(['bisexual', 'bisexual', 'staminate', 'pistillate']),
+      B: I(2), Bt: I(3), hyp: pick(['none', 'none', 'cup', 'tube']), disc: pick([null, null, 'intra', 'extra']), resup: r() < 0.1,
+      colors: {}, look: { corolla: pick([undefined, 'rotate', 'campanulate', 'tubular', 'funnelform', 'salverform', 'urceolate', 'bilabiate', 'papilionaceous', 'cruciform', 'orchid']), synanther: r() < 0.1, pappus: r() < 0.05, dyn: pick([undefined, 'didynamous', 'tetradynamous']), stigma: pick([undefined, 'capitate', 'bifid', 'lobed']) } };
+    const pt = I(4);
+    if (pt === 0) { m.K = organ(2, true, true); m.C = organ(2, true, true); }
+    if (pt === 1) m.P = organ(3, true, true);
+    if (pt === 2) m.P = organ(1, false, false);
+    if (r() < 0.12) m.E = { w: [{ n: 2 + I(6) }] };
+    if (r() < 0.9) m.A = organ(3, true, true);
+    if (r() < 0.9) m.G = { w: [{ n: r() < 0.06 ? '∞' : 1 + I(9), connate: pick([true, true, false, 'apical']), state: r() < 0.08 ? 'sterile' : 'fertile' }],
+      pos: pick(['superior', 'half', 'inferior']), plac: pick([undefined, 'axile', 'parietal', 'freecentral', 'basal', 'apical', 'marginal', 'laminar']),
+      loc: r() < 0.3 ? 1 + I(6) : undefined, ov: r() < 0.5 ? cnt() : undefined, style: pick(['terminal', 'gynobasic']), replum: r() < 0.1, falseSepta: r() < 0.1, ang: r() < 0.1 ? I(360) : undefined };
+    const ad = [];
+    if (r() < 0.3 && (m.C || m.P) && m.A) ad.push([m.C ? 'C' : 'P', 'A']);
+    if (r() < 0.1 && m.A && m.G) ad.push(['A', 'G']);
+    m.adn = ad;
+    try {
+      const f = FM.normalize(m);
+      const outs = [Formula.html(f, 'classic'), Formula.html(f, 'prenner', PO), Diagram.svg(f, { colors: pick(['whorl', 'natural', 'bw']) }), Section.svg(f), FM.describe(f, pick(['es', 'en'])).map(x => x.html).join(' ')];
+      const sc = Flower3D.build(f, { explode: r() });
+      const finite = sc.prims.every(p => (p.pts || [p.c]).every(q => q.every(Number.isFinite)));
+      if (outs.some(o => /NaN|undefined|Infinity/.test(o)) || !finite) { bad++; if (fails.length < 4) fails.push('dibujo: ' + JSON.stringify(m).slice(0, 300)); }
+      /* expanded formula: write → read → write must be identical */
+      if (!['K', 'C', 'P', 'A', 'G'].some(k => f[k])) continue;   /* a "flower" with no whorl at all has no formula */
+      const t1 = Formula.text(f, 'prenner', PO), p1 = Formula.parse(t1), t2 = Formula.text(p1.model, 'prenner', PO);
+      if (t1 !== t2 || p1.warnings.length) { rtBad++; if (fails.length < 8) fails.push(`Prenner: ${esc(t1)} → ${esc(t2)} ${p1.warnings.join('; ')}`); }
+      /* classic formula: reading it back and writing it again gives the same text */
+      const c1 = Formula.text(f, 'classic'), c2 = Formula.text(Formula.parse(c1).model, 'classic');
+      if (c1 !== c2) { clBad++; if (fails.length < 12) fails.push(`clásica: ${esc(c1)} → ${esc(c2)}`); }
+    } catch (e) { bad++; if (fails.length < 12) fails.push('error: ' + e.message + ' ' + JSON.stringify(m).slice(0, 200)); }
+  }
+  ok(bad === 0, `Las 600 flores se dibujan (diagrama, corte, 3D, fórmulas, descripción) sin errores ni números inválidos`, bad ? `${bad} fallos<br>` + fails.join('<br>') : '');
+  ok(rtBad === 0, 'Fórmula de Prenner: escribir → leer → escribir da el mismo texto en las 600', rtBad ? `${rtBad} fallos<br>` + fails.join('<br>') : '');
+  ok(clBad === 0, 'Fórmula clásica: leerla y reescribirla da el mismo texto en las 600', clBad ? `${clBad} fallos<br>` + fails.join('<br>') : '');
+}
+
+/* ---------- report ---------- */
+const bad = results.filter(r => !r.pass);
+document.getElementById('sum').innerHTML = `<span class="${bad.length ? 'bad' : 'ok'}">${results.length - bad.length} de ${results.length} pruebas correctas</span>`;
+let html = '', cur = '';
+for (const r of results) {
+  if (r.section !== cur) { if (cur) html += '</table>'; cur = r.section; html += `<h2>${esc(cur)}</h2><table>`; }
+  html += `<tr><td class="r ${r.pass ? 'ok' : 'bad'}">${r.pass ? '✓' : '✗'}</td><td>${esc(r.name)}${r.detail ? '<br>' + r.detail : ''}</td></tr>`;
+}
+document.getElementById('out').innerHTML = html + '</table>';
+window.TEST_RESULTS = { total: results.length, failed: bad.map(r => r.section + ' — ' + r.name + ' — ' + r.detail.replace(/<[^>]+>/g, ' ')) };
+document.title = `${results.length - bad.length}/${results.length} — pruebas FloralPro`;
+</script>
+</body>
+</html>

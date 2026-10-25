@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>FloralPro — galería del atlas</title>
+<link rel="stylesheet" href="../css/labg-base.css">
+<link rel="stylesheet" href="../css/style.css">
+<style>
+  body { padding: 12px; }
+  .at-grid { grid-template-columns: repeat(4, 1fr); }
+  .at-fig { height: 200px; }
+</style>
+</head>
+<body>
+<h2 id="h"></h2>
+<div class="at-grid" id="g"></div>
+<script src="../js/i18n.js"></script>
+<script src="../js/core.js"></script>
+<script src="../js/model.js"></script>
+<script src="../js/formula.js"></script>
+<script src="../js/diagram.js"></script>
+<script src="../js/section.js"></script>
+<script src="../js/flower3d.js"></script>
+<script src="../js/specimens.js"></script>
+<script src="../js/art.js"></script>
+<script src="../js/atlas.js"></script>
+<script src="../js/block3.js"></script>
+<script>
+  const qs = new URLSearchParams(location.search);
+  const secs = (qs.get('sec') || 'corolla').split(',');
+  document.getElementById('h').textContent = secs.join(', ');
+  const plates = ATLAS.PLATES.filter(p => secs.includes(p.sec));
+  document.getElementById('g').innerHTML = plates.map(p => {
+    const figs = Array.isArray(p.fig) ? p.fig : [p.fig];
+    const cls = f => f.t === 'diagram' || f.t === 'section' ? 'paper' : f.t === '3d' ? 'soft' : 'plain';
+    return `<article class="at-card"><div class="at-fig${figs.length > 1 ? ' two' : ''}">${figs.map(f => `<div class="at-f1 ${cls(f)}">${B3.figSVG(p, f)}</div>`).join('')}</div><div class="at-body"><h4>${p.t[0]}</h4><p class="at-d">${p.d[0]}</p></div></article>`;
+  }).join('');
+</script>
+</body>
+</html>

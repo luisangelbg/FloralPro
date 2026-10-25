@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>FloralPro — pruebas del Bloque 5</title>
+<link rel="stylesheet" href="../css/labg-base.css">
+<link rel="stylesheet" href="../css/style.css">
+<style>
+  body { padding: 18px; max-width: 1100px; margin: 0 auto; }
+  .sum { font-size: 1.2rem; font-weight: 700; margin: 8px 0 14px; }
+  .ok { color: var(--success); } .bad { color: var(--danger); }
+  table { width: 100%; border-collapse: collapse; font-size: .82rem; }
+  td { border-bottom: 1px solid var(--border); padding: 3px 6px; vertical-align: top; }
+  td.r { width: 26px; text-align: center; font-weight: 700; }
+  h2 { font-size: 1rem; margin: 18px 0 4px; }
+  iframe { width: 1300px; height: 900px; border: 1px solid var(--border); }
+  .note { font-size: .8rem; color: var(--text-muted); }
+</style>
+</head>
+<body>
+<h1>FloralPro — pruebas del Bloque 5 (Clave interactiva)</h1>
+<div class="sum" id="sum">…</div>
+<div id="out"></div>
+<iframe id="app" src="../index.html#b5"></iframe>
+<script>
+const results = [];
+let section = '';
+const sec = n => { section = n; };
+function ok(c, name, detail) { results.push({ section, pass: !!c, name, detail: detail || '' }); }
+function info(name, detail) { results.push({ section, pass: true, info: true, name, detail: detail || '' }); }
+function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+const wait = ms => new Promise(r => setTimeout(r, ms));
+document.getElementById('app').addEventListener('load', () => setTimeout(run, 700));
+
+async function run() {
+  const W = document.getElementById('app').contentWindow, D = W.document;
+  const KEEP = ['floralpro:myflowers', 'floralpro:draft', 'floralpro:lang', 'floralpro:conv', 'floralpro:colors'];
+  const kept = {}; KEEP.forEach(k => { kept[k] = W.localStorage.getItem(k); });
+  try { dataTests(W); keyTests(W); await uiTests(W, D); } catch (e) { ok(false, 'Error: ' + e.message, esc(e.stack || '')); }
+  finally { KEEP.forEach(k => { if (kept[k] == null) W.localStorage.removeItem(k); else W.localStorage.setItem(k, kept[k]); }); }
+  report();
+}
+
+function dataTests(W) {
+  const { KEYCHARS, KEYGROUPS, KEYFIX, FAMILIES, B3 } = W;
+  /* the plant characters of a family: defaults, then the table, then the exceptions */
+  const KEYVEG = {};
+  FAMILIES.forEach(f => { KEYVEG[f.id] = Object.assign({}, W.KEYVEG_DEFAULT, W.KEYVEG[f.id] || {}); });
+  Object.keys(W.KEYVEG).forEach(k => { if (!KEYVEG[k]) KEYVEG[k] = W.KEYVEG[k]; });
+  Object.entries(W.KEYROW).forEach(([fid, rows]) => Object.entries(rows).forEach(([k, o]) => { KEYVEG[fid + ' ' + k] = o; }));
+  sec('1. Caracteres y datos de la clave');
+  const ids = KEYCHARS.map(c => c.id);
+  ok(new Set(ids).size === ids.length, `${ids.length} caracteres con identificador único`);
+  const grp = new Set(KEYGROUPS.map(g => g.id));
+  ok(KEYCHARS.every(c => grp.has(c.grp)), 'Cada carácter pertenece a un grupo');
+  const badSt = KEYCHARS.filter(c => new Set(c.st.map(s => s[0])).size !== c.st.length || c.st.some(s => !s[1] || !s[2]) || !c.q[0] || !c.q[1]);
+  ok(!badSt.length, 'Estados sin repetir y todo en español e inglés', badSt.map(c => c.id).join(', '));
+  const badTerm = KEYCHARS.filter(c => c.term && !B3.lookup(c.term));
+  ok(!badTerm.length, 'Los términos de los caracteres están en el glosario', badTerm.map(c => c.id + ': ' + c.term).join(', '));
+  const vegChars = KEYCHARS.filter(c => c.grp === 'veg' || c.grp === 'inf');
+  const missing = FAMILIES.filter(f => !KEYVEG[f.id] || vegChars.some(c => !KEYVEG[f.id][c.id]));
+  ok(!missing.length, `Las ${FAMILIES.length} familias tienen codificados los ${vegChars.length} caracteres de planta, inflorescencia y fruto`, missing.map(f => f.id).join(', '));
+  const extra = Object.keys(KEYVEG).filter(k => !FAMILIES.some(f => f.id === k.split(' ')[0]));
+  ok(!extra.length, 'No hay códigos de familias que no existen', extra.join(', '));
+  const badCode = [];
+  Object.entries(Object.assign({}, KEYVEG, KEYFIX)).forEach(([fid, o]) => Object.entries(o).forEach(([c, v]) => {
+    const ch = KEYCHARS.find(x => x.id === c);
+    if (!ch) { badCode.push(fid + ': ' + c); return; }
+    String(v).split(/\s+/).filter(Boolean).forEach(s => { if (!ch.st.some(x => x[0] === s)) badCode.push(`${fid}.${c} = ${s}`); });
+  }));
+  ok(!badCode.length, 'Todos los códigos son estados válidos', badCode.join(', '));
+}
+
+function keyTests(W) {
+  const { KEY, FAMILIES, Fam, KEYCHARS } = W;
+  const M = KEY.matrix();
+  sec('2. Matriz de caracteres y acceso múltiple');
+  const core = ['sym', 'sex', 'per', 'hab', 'fil', 'fru'];
+  const gaps = FAMILIES.filter(f => core.some(c => !M.get(f.id)[c] || !M.get(f.id)[c].size));
+  ok(!gaps.length, 'Cada familia tiene estados de simetría, sexo, perianto, forma de vida, hojas y fruto', gaps.map(f => f.id).join(', '));
+  const noG = FAMILIES.filter(f => !M.get(f.id).pos || !M.get(f.id).carp);
+  ok(!noG.length, 'Cada familia tiene posición del ovario y carpelos (de alguna de sus flores)', noG.map(f => f.id).join(', '));
+  /* every flower identifies its own family from its floral characters */
+  const miss = [];
+  let nfl = 0;
+  FAMILIES.forEach(f => Fam.allFlowers(f).forEach(x => {
+    nfl++;
+    const sel = KEY.fromModel(x.m);
+    if (!KEY.remaining(sel, 0).some(r => r.fam === f)) miss.push(f.name + ' · ' + (x.sp ? x.sp.sci : x.kind));
+  }));
+  ok(!miss.length, `Cada una de las ${nfl} flores, observada en la clave, deja en pie a su propia familia`, miss.join('<br>'));
+  /* how far the floral characters of one flower go */
+  const sizes = [];
+  FAMILIES.forEach(f => { const x = Fam.allFlowers(f)[0]; sizes.push(KEY.remaining(KEY.fromModel(x.m), 0).length); });
+  sizes.sort((a, b) => a - b);
+  info(`Con solo la flor típica, quedan en mediana ${sizes[Math.floor(sizes.length / 2)]} familias (máximo ${sizes[sizes.length - 1]}); con la planta y el fruto se afina`);
+  /* kinds of flower of different families that no character can tell apart */
+  const R = KEY.rows(), same = new Set();
+  for (let i = 0; i < R.length; i++) for (let j = i + 1; j < R.length; j++) {
+    if (R[i].fam === R[j].fam) continue;
+    const a = R[i].st, b = R[j].st;
+    const sep = KEYCHARS.some(c => a[c.id] && b[c.id] && a[c.id].size && b[c.id].size && ![...a[c.id]].some(s => b[c.id].has(s)));
+    if (!sep) same.add(R[i].fam.name + ' / ' + R[j].fam.name);
+  }
+  info(`${R.length} tipos de flor distintos en la matriz (filas)`);
+  ok(!same.size, 'Todo tipo de flor difiere en al menos un carácter de los de otras familias', [...same].join(', '));
+  const sug = KEY.suggest({}, FAMILIES, 3);
+  ok(sug.length === 3 && sug.every(s => s.exp < FAMILIES.length), 'Hay sugerencias del carácter más útil al empezar', sug.map(s => s.c + ' ≈' + s.exp.toFixed(1)).join(', '));
+  const r1 = KEY.remaining({ pos: 'inf', sym: 'zyg' }, 0).map(x => x.fam.id);
+  ok(r1.includes('orchidaceae') && !r1.includes('liliaceae') && !r1.includes('solanaceae'), 'Ovario ínfero + flor zigomorfa: quedan las orquídeas, no liliáceas ni solanáceas', r1.join(', '));
+  /* plants of the catalogue that the first coding excluded from their own family (found by the review) */
+  const cases = [
+    ['araceae', { hab: 'e', sub: 'no', fru: 'inf' }, 'Monstera: epífita, sin órgano subterráneo, fruto múltiple'],
+    ['amaryllidaceae', { inf: 'sol', pos: 'inf' }, 'Sprekelia y narciso: flor solitaria'],
+    ['asparagaceae', { sub: 'bul' }, 'Nardo (Polianthes): bulbo'],
+    ['arecaceae', { hoj: 's' }, 'Palmas de abanico: hoja simple dividida'],
+    ['commelinaceae', { sub: 'tub', fil: 'b' }, 'Commelina y maguey morado: raíz tuberosa y roseta'],
+    ['rhamnaceae', { inf: 'pan' }, 'Ceanothus: panícula'],
+    ['euphorbiaceae', { lat: '0', sex: 'uni' }, 'Higuerilla: sin látex visible'],
+    ['malpighiaceae', { fru: 'esq' }, 'Galphimia: esquizocarpo'],
+    ['fabaceae', { sub: 'tub' }, 'Ayocote: raíz tuberosa'],
+    ['zingiberaceae', { inf: 'pan' }, 'Cardamomo: panícula'],
+    ['ranunculaceae', { inf: 'pan', sex: 'bis' }, 'Clematis: panícula'],
+    ['convolvulaceae', { fil: 'n', lat: '0' }, 'Cuscuta: sin hojas visibles ni látex'],
+    ['asteraceae', { pun: '1' }, 'Cempasúchil y pápalo: puntos translúcidos'],
+    ['myrtaceae', { fil: 'a' }, 'Eucalipto: hojas adultas alternas'],
+    ['lamiaceae', { sub: 'riz' }, 'Hierbabuena: rizoma'],
+    ['verbenaceae', { fil: 'v' }, 'Cedrón: hojas verticiladas'],
+    ['bignoniaceae', { hoj: 'c', fil: 'a', plac: 'par' }, 'Cuatecomate: hojas trifolioladas alternas'],
+    ['apocynaceae', { inf: 'sol' }, 'Vicaria (Catharanthus): flor solitaria'],
+  ];
+  const lostCases = cases.filter(([f, sel]) => !KEY.remaining(sel, 0).some(r => r.fam.id === f)).map(c => c[2]);
+  ok(!lostCases.length, `Los ${cases.length} casos que encontró la revisión ya no excluyen a su familia`, lostCases.join('; '));
+  const t0 = KEY.remaining({ pos: 'inf', fil: 'n' }, 0).length, t1 = KEY.remaining({ pos: 'inf', fil: 'n' }, 1).length;
+  ok(t1 > t0, 'Permitir un error deja más familias', `${t0} → ${t1}`);
+
+  sec('3. Clave dicotómica');
+  const T = KEY.build(FAMILIES);
+  const inLeaf = new Set(T.leaves.flatMap(l => l.leaf));
+  ok(FAMILIES.every(f => inLeaf.has(f.id)), `Las ${FAMILIES.length} familias aparecen en la clave (${T.couplets.length} parejas)`);
+  const multi = T.leaves.filter(l => l.leaf.length > 1);
+  ok(!multi.length, 'Cada final de la clave lleva a una sola familia', multi.map(l => l.leaf.join(' / ')).join('; '));
+  let depth = 0;
+  FAMILIES.forEach(f => { depth = Math.max(depth, KEY.pathTo(T, f.id).length); });
+  info(`Profundidad máxima: ${depth} parejas`);
+  /* walking the key with each kind of flower (and its plant) reaches its family */
+  const lost = KEY.rows().filter(r => !KEY.reach(T, r.st).has(r.fam.id)).map(r => r.id);
+  ok(!lost.length, `Recorrer la clave con cada uno de los ${KEY.rows().length} tipos de flor (y su planta) llega a su familia`, lost.slice(0, 30).join('<br>'));
+  /* and with a single definite choice at every couplet (one state per character) */
+  const lost1 = [];
+  KEY.rows().forEach(r => {
+    const one = {};
+    for (const c in r.st) one[c] = new Set([[...r.st[c]][0]]);
+    const x = KEY.follow(T, one);
+    if (!x.leaf || !x.leaf.includes(r.fam.id)) lost1.push(r.id);
+  });
+  ok(!lost1.length, 'Eligiendo un solo estado en cada pareja también se llega a la familia', lost1.slice(0, 30).join(', '));
+  const badPath = FAMILIES.filter(f => {
+    const p = KEY.pathTo(T, f.id);
+    let x = T.root; p.forEach(s => { x = x[s.side]; });
+    return !x.leaf || !x.leaf.includes(f.id);
+  });
+  ok(!badPath.length, 'El camino hacia cada familia termina en ella', badPath.map(f => f.id).join(', '));
+  const Tf = KEY.build(FAMILIES, { floralOnly: true });
+  const usedF = new Set(Tf.couplets.map(c => KEY.CH(c.c).grp));
+  ok([...usedF].every(g => KEY.FLORAL.has(g)), 'La clave «solo flor» usa solo caracteres de la flor');
+  info(`Solo con la flor: ${Tf.couplets.length} parejas; ${Tf.leaves.filter(l => l.leaf.length > 1).length} finales con varias familias`, Tf.leaves.filter(l => l.leaf.length > 1).map(l => l.leaf.join(' / ')).join('; '));
+  const mono = FAMILIES.filter(f => W.B4.groupOf(f) === 'monocots');
+  const Tm = KEY.build(mono);
+  const monoReach = new Set(Tm.leaves.flatMap(l => l.leaf));
+  ok(Tm.leaves.every(l => l.leaf.length === 1) && mono.every(f => monoReach.has(f.id)), `Clave de las ${mono.length} monocotiledóneas: cada final lleva a una sola familia y todas aparecen`);
+  const txt = KEY.leadText('pos', ['sup', 'semi'], 'es');
+  ok(txt === 'Posición del ovario: súpero o semiínfero', 'Texto de una opción: «Posición del ovario: súpero o semiínfero»', txt);
+}
+
+async function uiTests(W, D) {
+  const { KEY, FAMILIES, B5, B2, I18N, Fam } = W;
+  const $ = s => D.querySelector(s), $$ = s => [...D.querySelectorAll(s)];
+  const vis = n => n && W.getComputedStyle(n).display !== 'none';
+  const click = n => n.dispatchEvent(new W.MouseEvent('click', { bubbles: true }));
+  if (I18N.lang !== 'es') I18N.set('es');
+  sec('4. Clave de acceso múltiple');
+  W.goStep(5);
+  ok($('#panel-5').classList.contains('active') && !$('.step-btn[data-step="5"] .soon'), 'El bloque 5 está listo y abre');
+  B5.S.sel = {}; B5.S.tol = 0; B5.S.scope = 'all'; B5.S.floral = false; B5.showTab('multi');
+  const left = () => { const t = ($('#k5Left b') || {}).textContent; return /^(una|one)$/i.test(t) ? 1 : +t; };
+  const nMulti = W.KEYCHARS.filter(c => c.multi !== false).length;
+  ok(left() === FAMILIES.length && $$('#k5Chars .k-char').length === nMulti, `Al empezar quedan ${FAMILIES.length} familias y se ven los ${nMulti} caracteres de esta clave`);
+  ok($$('#k5Sug .k-go').length === 3, 'Sugiere tres caracteres útiles');
+  click($('.k-st[data-c="pos"][data-s="inf"]'));
+  const exp1 = KEY.remaining({ pos: 'inf' }, 0).length;
+  ok(left() === exp1 && $$('#k5Res .k-fam').length === Math.min(exp1, 60), `Marcar «ovario ínfero» deja ${exp1} familias`);
+  const nInf = +$('.k-st[data-c="sym"][data-s="zyg"] .n').textContent;
+  ok(nInf === KEY.remaining({ pos: 'inf', sym: 'zyg' }, 0).length, 'El número junto a cada estado cuenta las familias que siguen en juego');
+  click($('.k-st[data-c="sym"][data-s="zyg"]'));
+  click($('.k-st[data-c="hab"][data-s="e"]'));
+  ok(left() >= 1 && $$('#k5Res .k-fam').some(f => f.dataset.f === 'orchidaceae'), 'Ínfero + zigomorfa + epífita: aparecen las orquídeas');
+  ok(vis($('#k5Diff')) || left() === 1, 'Con pocas familias se muestra lo que las distingue');
+  click($('[data-clear="hab"]'));
+  ok(!('hab' in B5.S.sel), '«no sé» borra lo marcado en un carácter');
+  const before = left();
+  const tol = $('#k5Tol'); tol.value = '1'; tol.dispatchEvent(new W.Event('change'));
+  ok(left() > before && $$('#k5Res .k-miss').length > 0, 'Con un error tolerado aparecen más familias, cada una dice en qué no coincide');
+  tol.value = '0'; tol.dispatchEvent(new W.Event('change'));
+  click($('#k5Reset'));
+  ok(left() === FAMILIES.length && !Object.keys(B5.S.sel).length, '«Empezar de nuevo» vuelve a las 82');
+  const fl = $('#k5Floral'); fl.checked = true; fl.dispatchEvent(new W.Event('change'));
+  ok(!$('#kc-hab') && $('#kc-pos'), '«Solo caracteres de la flor» oculta los de la planta');
+  fl.checked = false; fl.dispatchEvent(new W.Event('change'));
+  const sc = $('#k5Scope'); sc.value = 'monocots'; sc.dispatchEvent(new W.Event('change'));
+  ok(left() === FAMILIES.filter(f => W.B4.groupOf(f) === 'monocots').length, 'Limitar a las monocotiledóneas');
+  sc.value = 'all'; sc.dispatchEvent(new W.Event('change'));
+  await wait(200);
+  ok($$('#k5Res .k-fig[data-done]').length > 0, 'Las tarjetas de familia dibujan su diagrama');
+
+  sec('5. Del constructor a la clave');
+  const lil = W.SPECIMENS.find(s => s.id === 'lilium').flowers[0].m;
+  B2.load(lil, 'Azucena'); W.goStep(2);
+  click($('#b2Key'));
+  const res = $$('#k5Res .k-fam').map(f => f.dataset.f);
+  ok($('#panel-5').classList.contains('active') && res.includes('liliaceae') && vis($('#k5From')), '«Identificar en la clave» lleva la azucena a la clave y deja en pie a Liliaceae', res.join(', '));
+  info(`La azucena sola deja ${res.length} familias: ${res.join(', ')}`);
+  click($('#k5Reset'));
+
+  sec('6. Clave dicotómica');
+  click($('#k5Tabs [data-tab="dic"]'));
+  ok(vis($('#k5Dic')) && /k=dic/.test(W.location.hash), 'La pestaña de la clave dicotómica abre y la dirección lo guarda');
+  ok($$('#k5Walk .k-lead').length === 2, 'Muestra la primera pareja con sus dos opciones');
+  /* walk to the orchids by choosing, at each couplet, the lead that fits them */
+  const M = KEY.matrix(), orq = M.get('orchidaceae');
+  for (let i = 0; i < 40 && $$('#k5Walk .k-lead').length; i++) {
+    const t = B5.tree(); let x = t.root; B5.S.walk.forEach(s => { x = x[s]; });
+    const side = x.a.some(s => orq[x.c] && orq[x.c].has(s)) ? 'left' : 'right';
+    click($(`#k5Walk .k-lead[data-side="${side}"]`));
+  }
+  ok($$('#k5Walk .k-end .k-fam').some(f => f.dataset.f === 'orchidaceae'), 'Recorrerla eligiendo lo que muestran las orquídeas termina en Orchidaceae');
+  ok($$('#k5Walk .k-crumb').length === B5.S.walk.length, 'Cada paso queda en el camino recorrido');
+  click($('#k5Walk .k-crumb'));
+  ok(B5.S.walk.length === 0 && $$('#k5Walk .k-lead').length === 2, 'Un clic en el camino regresa a esa pareja');
+  click($('#k5DView [data-v="full"]'));
+  ok($$('#k5Full li').length === B5.tree().couplets.length && $$('#k5Full .k-row').length === 2 * B5.tree().couplets.length, 'La clave completa muestra todas las parejas (a y b)');
+  const df = $('#k5DFloral'); df.checked = true; df.dispatchEvent(new W.Event('change'));
+  ok(B5.tree().couplets.every(c => KEY.FLORAL.has(KEY.CH(c.c).grp)), 'Clave «solo flor» regenerada');
+  df.checked = false; df.dispatchEvent(new W.Event('change'));
+  click($('#k5DView [data-v="walk"]'));
+
+  sec('7. De la ficha de familia a la clave');
+  W.B4.openFamily('cactaceae');
+  ok($('#b4SheetBody .fs-key .k-path li'), 'La ficha de las cactáceas muestra su camino en la clave dicotómica');
+  click($('#b4SheetBody [data-act="key"]'));
+  ok($('#panel-5').classList.contains('active') && $$('#k5Walk .k-end .k-fam').some(f => f.dataset.f === 'cactaceae'), '«Recorrer este camino» abre la clave ya en las cactáceas');
+
+  sec('8. Idioma y teléfono');
+  I18N.set('en');
+  B5.showTab('multi');
+  ok(/families remain/.test($('#k5Left').textContent) && /Symmetry of the flower/.test($('#k5Chars').textContent), 'En inglés');
+  I18N.set('es');
+  const fr = document.createElement('iframe');
+  fr.style.cssText = 'width:390px;height:800px';
+  document.body.appendChild(fr);
+  for (const [h, what] of [['#b5', 'acceso múltiple'], ['#b5&k=dic', 'clave dicotómica']]) {
+    fr.src = '../index.html?w=' + encodeURIComponent(what) + h;
+    await new Promise(r => { fr.onload = r; });
+    await wait(500);
+    const Mo = fr.contentWindow.document;
+    const over = Mo.documentElement.scrollWidth - Mo.documentElement.clientWidth;
+    ok(over <= 0, `Sin desbordamiento horizontal a 390 px: ${what}`, over > 0 ? over + ' px' : '');
+  }
+  fr.remove();
+}
+
+function report() {
+  const bad = results.filter(r => !r.pass), n = results.filter(r => !r.info).length;
+  const sum = document.getElementById('sum');
+  sum.innerHTML = bad.length ? `<span class="bad">${bad.length} de ${n} pruebas fallan</span>` : `<span class="ok">Las ${n} pruebas pasan</span>`;
+  sum.dataset.pass = n - bad.length; sum.dataset.fail = bad.length;
+  let h = '', cur = null;
+  results.forEach(r => {
+    if (r.section !== cur) { if (cur !== null) h += '</table>'; h += `<h2>${r.section}</h2><table>`; cur = r.section; }
+    h += `<tr><td class="r ${r.info ? '' : r.pass ? 'ok' : 'bad'}">${r.info ? 'i' : r.pass ? '✓' : '✗'}</td><td>${r.name}${r.detail ? `<div class="note">${r.detail}</div>` : ''}</td></tr>`;
+  });
+  document.getElementById('out').innerHTML = h + '</table>';
+}
+</script>
+</body>
+</html>

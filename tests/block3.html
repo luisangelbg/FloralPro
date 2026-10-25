@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>FloralPro — pruebas del Bloque 3</title>
+<link rel="stylesheet" href="../css/labg-base.css">
+<link rel="stylesheet" href="../css/style.css">
+<style>
+  body { padding: 18px; max-width: 1100px; margin: 0 auto; }
+  .sum { font-size: 1.2rem; font-weight: 700; margin: 8px 0 14px; }
+  .ok { color: var(--success); } .bad { color: var(--danger); }
+  table { width: 100%; border-collapse: collapse; font-size: .82rem; }
+  td { border-bottom: 1px solid var(--border); padding: 3px 6px; vertical-align: top; }
+  td.r { width: 26px; text-align: center; font-weight: 700; }
+  h2 { font-size: 1rem; margin: 18px 0 4px; }
+  iframe { width: 1300px; height: 900px; border: 1px solid var(--border); }
+</style>
+</head>
+<body>
+<h1>FloralPro — pruebas del Bloque 3 (Atlas y glosario)</h1>
+<div class="sum" id="sum">…</div>
+<div id="out"></div>
+<iframe id="app" src="../index.html#b3"></iframe>
+<script>
+const results = [];
+let section = '';
+const sec = n => { section = n; };
+function ok(c, name, detail) { results.push({ section, pass: !!c, name, detail: detail || '' }); }
+function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+document.getElementById('app').addEventListener('load', () => setTimeout(run, 500));
+
+function run() {
+  const W = document.getElementById('app').contentWindow, D = W.document;
+  const KEEP = ['floralpro:myflowers', 'floralpro:draft', 'floralpro:lang', 'floralpro:conv', 'floralpro:colors'];
+  const kept = {}; KEEP.forEach(k => { kept[k] = W.localStorage.getItem(k); });
+  try { tests(W, D); } catch (e) { ok(false, 'Error: ' + e.message, esc(e.stack || '')); }
+  finally { KEEP.forEach(k => { if (kept[k] == null) W.localStorage.removeItem(k); else W.localStorage.setItem(k, kept[k]); }); }
+  report();
+}
+function terms(FM, m, lang) {
+  const html = FM.describe(m, lang).map(x => x.html).join(' ');
+  return new Set([...html.matchAll(/data-term="([^"]+)"/g)].map(x => x[1]));
+}
+function tests(W, D) {
+  const { ATLAS, B3, B2, FM, Art, SPECIMENS, Formula } = W;
+  const P = ATLAS.PLATES;
+
+  sec('1. Estructura de las láminas');
+  const ids = P.map(p => p.id);
+  ok(new Set(ids).size === ids.length, `${P.length} láminas con identificador único`);
+  const secs = new Set(ATLAS.SECTIONS.map(s => s.id));
+  ok(P.every(p => secs.has(p.sec)), 'Cada lámina pertenece a una sección existente');
+  const bil = P.filter(p => !(p.t && p.t[0] && p.t[1] && p.d && p.d[0] && p.d[1]));
+  ok(!bil.length, 'Título y definición en español y en inglés en todas', bil.map(p => p.id).join(', '));
+  const noEx = P.filter(p => !(p.x && p.x[0] && p.x[1]));
+  ok(!noEx.length, 'Ejemplos en ambos idiomas en todas', noEx.map(p => p.id).join(', '));
+  const arts = P.flatMap(p => (Array.isArray(p.fig) ? p.fig : [p.fig]).filter(f => f.t === 'art').map(f => f.id));
+  const missing = arts.filter(a => !Art.has(a));
+  ok(!missing.length, `${arts.length} dibujos propios existen`, missing.join(', '));
+
+  sec('2. Cada lámina muestra lo que nombra (validación contra el motor)');
+  let nNeed = 0, nCheck = 0;
+  P.forEach(p => {
+    const m = B3.resolve(p.m);
+    if (!m) return;
+    const f = FM.normalize(m);
+    if (p.need) {
+      nNeed++;
+      const es = terms(FM, m, 'es'), en = terms(FM, m, 'en');
+      ok(es.has(p.need) && en.has(p.need), `${p.id}: la descripción del modelo dice «${p.need}»`, es.has(p.need) ? '' : [...es].join(', '));
+    }
+    if (p.check) { nCheck++; ok(p.check(f), `${p.id}: comprobación específica del modelo`); }
+    if (!p.need && !p.check) ok(false, `${p.id}: tiene modelo pero nada que lo compruebe`);
+  });
+  ok(nNeed + nCheck > 80, `${nNeed} láminas comprobadas por término y ${nCheck} por una prueba propia`);
+
+  sec('3. Los modelos de las láminas son botánicamente coherentes');
+  P.forEach(p => {
+    const m = B3.resolve(p.m);
+    if (!m) return;
+    const w = B2.checks(m).filter(x => x.lvl === 'warn');
+    ok(!w.length, `${p.id}: sin incoherencias`, w.map(x => x.es).join('; '));
+  });
+
+  sec('4. Las figuras se dibujan');
+  P.forEach(p => {
+    (Array.isArray(p.fig) ? p.fig : [p.fig]).forEach(f => {
+      let s = '';
+      try { s = B3.figSVG(p, f); } catch (e) { s = 'ERR ' + e.message; }
+      ok(/^<svg/.test(s) && !/NaN|undefined|Infinity/.test(s), `${p.id}: figura ${f.t}${f.id ? ' ' + f.id : ''}`, /^<svg/.test(s) ? '' : esc(s.slice(0, 120)));
+    });
+  });
+
+  sec('5. Todo término subrayado tiene definición');
+  const used = new Set();
+  const collect = m => ['es', 'en'].forEach(l => terms(FM, m, l).forEach(t => used.add(t)));
+  SPECIMENS.forEach(sp => sp.flowers.forEach(fl => collect(fl.m)));
+  P.forEach(p => { const m = B3.resolve(p.m); if (m) collect(m); });
+  /* random flowers, as in the engine tests */
+  let a = 0x9e3779b9, b = 0x243f6a88, c = 0xb7e15162, d = 7;
+  const r = () => { a >>>= 0; b >>>= 0; c >>>= 0; d >>>= 0; let t = (a + b) | 0; a = b ^ (b >>> 9); b = (c + (c << 3)) | 0; c = (c << 21) | (c >>> 11); d = (d + 1) | 0; t = (t + d) | 0; c = (c + t) | 0; return (t >>> 0) / 4294967296; };
+  const pick = arr => arr[Math.floor(r() * arr.length)];
+  for (let i = 0; i < 600; i++) {
+    const m = { sym: pick(['actino', 'zygo', 'zygoT', 'zygoO', 'disym', 'asym', 'spiral']), sex: pick(['bisexual', 'staminate', 'pistillate']), resup: r() < 0.2, hyp: pick(['none', 'cup']), disc: pick([null, 'intra', 'extra']), corona: r() < 0.2 ? { n: 30 } : null,
+      look: { corolla: pick([undefined, ...Object.keys(FM.COROLLA)]), anther: pick([undefined, 'basifixed', 'dorsifixed', 'versatile']), dehisc: pick([undefined, 'poricidal', 'valvular', 'transverse']), thecae: pick([undefined, 1]), pollinia: r() < 0.2, synanther: r() < 0.2, pappus: r() < 0.2, dyn: pick([undefined, 'didynamous', 'tetradynamous']), stigma: pick([undefined, 'capitate', 'lobed', 'bifid', 'plumose', 'petaloid', 'discoid', 'punctiform']) } };
+    const pt = pick(['h', 'p', 'm', 'n']);
+    if (pt === 'h') { m.K = { w: [{ n: pick([4, 5]), connate: r() < 0.5 }], aest: pick([undefined, ...Object.keys(FM.W.aest.es)]), like: r() < 0.2 ? 'C' : null }; m.C = { w: [{ n: 5, connate: r() < 0.5 }], aest: pick([undefined, ...Object.keys(FM.W.aest.es)]) }; }
+    if (pt === 'p') m.P = { w: [3, 3], connate: r() < 0.3, like: pick(['C', 'K']) };
+    if (pt === 'm') m.P = { w: [5], like: 'K' };
+    if (r() < 0.2) m.E = { w: [3] };
+    m.A = { w: pick([[5], [5, 5], [{ n: 5, opp: true }], [{ n: 5, opp: true }, 5], [{ n: '∞', connate: true }], [{ n: 3, fasc: { g: 3, per: '∞' } }], [{ parts: [{ n: 4 }, { n: 1, state: 'sterile' }] }], [2], [{ n: 7 }]]) };
+    m.G = { w: [{ n: pick([1, 2, 3, 5, '∞']), connate: pick([true, false, 'apical']) }], pos: pick(['superior', 'half', 'inferior']), plac: pick(Object.keys(FM.W.plac.es)), style: pick(['terminal', 'gynobasic', 'lateral']), replum: r() < 0.2, falseSepta: r() < 0.2, loc: r() < 0.3 ? 4 : undefined };
+    m.adn = pick([[], [['C', 'A']], [['P', 'A']], [['A', 'G']]]);
+    collect(m);
+  }
+  const orphan = [...used].filter(t => !B3.lookup(t));
+  ok(!orphan.length, `Los ${used.size} términos que usan las descripciones tienen definición en el glosario`, orphan.join(', '));
+  const gl = B3.glossaryEntries();
+  const badGl = gl.filter(e => !(e.t[0] && e.t[1] && e.d[0] && e.d[1]));
+  ok(!badGl.length, `${gl.length} entradas del glosario, todas en español y en inglés`, badGl.map(e => e.key).join(', '));
+
+  sec('6. La interfaz del atlas');
+  const q = s => D.querySelector(s);
+  ok(D.querySelectorAll('#b3Main .at-card').length === P.length, 'Se muestran todas las láminas');
+  const s = q('#b3Search');
+  s.value = 'parietal'; s.dispatchEvent(new W.Event('input'));
+  const vis = [...D.querySelectorAll('#b3Main .at-card')].filter(c => c.style.display !== 'none').map(c => c.dataset.id);
+  ok(vis.includes('plac-parietal') && vis.length < 10, 'La búsqueda «parietal» deja pocas láminas, entre ellas la de placentación parietal', vis.join(', '));
+  s.value = 'gamosepalo'; s.dispatchEvent(new W.Event('input'));
+  ok([...D.querySelectorAll('#b3Main .at-card')].some(c => c.style.display !== 'none' && c.dataset.id === 'gamosepalous'), 'La búsqueda ignora acentos (gamosepalo → gamosépalo)');
+  s.value = ''; s.dispatchEvent(new W.Event('input'));
+  B3.openPlate('plac-axile');
+  ok(q('#b3Dlg').open && q('#b3DlgViews .v-diagram svg') && /axilar/i.test(q('#b3DlgViews .v-desc').textContent), '«Ver en grande» abre la lámina con las vistas enlazadas');
+  q('#b3DlgBuild').click();
+  ok(!q('#b3Dlg').open && q('#panel-2').classList.contains('active') && W.FM.normalize(B2.S.m).G.plac === 'axile', '«Abrir en el constructor» lleva la flor al Bloque 2');
+  B3.openPlate('cyathium');
+  ok(q('#b3DlgArt svg') && q('#b3DlgBuild').style.display === 'none', 'Una lámina sin modelo se ve en grande, sin botón de constructor');
+  q('#b3Dlg').close();
+  W.goStep(1);
+  const dfn = D.querySelector('#trioViews .v-desc dfn[data-term]');
+  dfn.dispatchEvent(new W.MouseEvent('click', { bubbles: true }));
+  const pop = q('.gl-pop');
+  ok(pop && pop.classList.contains('on') && pop.textContent.length > 20, `Un término subrayado de la portada muestra su definición («${dfn.dataset.term}»)`);
+  const link = pop.querySelector('[data-plate]');
+  if (link) { link.click(); ok(q('#panel-3').classList.contains('active'), 'El enlace del recuadro lleva a su lámina del atlas'); }
+  W.I18N.set('en');
+  ok(/Whorl atlas/.test(q('#panel-3 .blk-title').textContent) && /Glossary/.test(q('#at-glossary h3').textContent), 'El atlas cambia a inglés');
+  W.I18N.set('es');
+}
+function report() {
+  const bad = results.filter(r => !r.pass);
+  document.getElementById('sum').innerHTML = `<span class="${bad.length ? 'bad' : 'ok'}">${results.length - bad.length} de ${results.length} pruebas correctas</span>`;
+  let html = '', cur = '';
+  for (const r of results) {
+    if (r.section !== cur) { if (cur) html += '</table>'; cur = r.section; html += `<h2>${esc(cur)}</h2><table>`; }
+    html += `<tr><td class="r ${r.pass ? 'ok' : 'bad'}">${r.pass ? '✓' : '✗'}</td><td>${esc(r.name)}${r.detail ? '<br>' + r.detail : ''}</td></tr>`;
+  }
+  document.getElementById('out').innerHTML = html + '</table>';
+  document.title = `${results.length - bad.length}/${results.length} — pruebas Bloque 3`;
+}
+</script>
+</body>
+</html>

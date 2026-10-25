@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>FloralPro — galería de estróbilos</title>
+<link rel="stylesheet" href="../css/labg-base.css">
+<link rel="stylesheet" href="../css/style.css">
+<style>
+  body { padding: 12px; }
+  .g { display: grid; grid-template-columns: repeat(var(--cols, 4), 1fr); gap: 8px; }
+  .c { border: 1px solid var(--border); border-radius: 8px; background: #fcf9fa; padding: 4px; }
+  .c .fig { height: var(--h, 220px); display: flex; align-items: center; justify-content: center; }
+  .c .fig svg { max-width: 100%; max-height: 100%; }
+  .c b { font-size: .75rem; }
+</style>
+</head>
+<body>
+<div class="g" id="g"></div>
+<script src="../js/i18n.js"></script>
+<script src="../js/core.js"></script>
+<script src="../js/flower3d.js"></script>
+<script src="../js/gymno.js"></script>
+<script src="../js/cone.js"></script>
+<script src="../js/cone3d.js"></script>
+<script src="../js/conefig.js"></script>
+<script>
+  /* ?ids=pinus-f,abies-f&stage=pol&open=0.5&view=3d|diagram|section|unit&cols=4&h=220&az=&el= */
+  const qs = new URLSearchParams(location.search);
+  const ids = qs.get('ids') ? qs.get('ids').split(',') : GYMNO.STROBILI.map(s => s.id);
+  const stage = qs.get('stage') || 'mat', open = +(qs.get('open') || 0), view = qs.get('view') || '3d';
+  document.body.style.setProperty('--cols', qs.get('cols') || 4);
+  document.body.style.setProperty('--h', (qs.get('h') || 220) + 'px');
+  const o = { stage, open };
+  if (qs.get('az')) o.az = +qs.get('az');
+  if (qs.get('el')) o.el = +qs.get('el');
+  document.getElementById('g').innerHTML = ids.map(id => {
+    const m = GYMNO.byId(id);
+    let svg = '';
+    try {
+      if (view === '3d') svg = Cone3D.staticSVG(m, o);
+      else if (window.ConeFig) svg = ConeFig[view](m, { stage, labels: qs.get('labels') !== '0' });
+    } catch (e) { svg = '<pre style="color:red;font-size:10px">' + e.stack + '</pre>'; }
+    return `<div class="c"><b>${id} · ${stage}</b><div class="fig">${svg}</div></div>`;
+  }).join('');
+</script>
+</body>
+</html>

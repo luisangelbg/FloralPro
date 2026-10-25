@@ -1,0 +1,29 @@
+{
+  "@context": "https://doi.org/10.5063/schema/codemeta-2.0",
+  "@type": "SoftwareSourceCode",
+  "name": "FloralPro",
+  "description": "A self-contained, browser-based app for teaching the structure of the flower. A whorl-by-whorl model of each flower is drawn as a floral formula (classic and Prenner conventions), a floral diagram, a rotatable 3D flower and a labelled longitudinal section, all linked. It includes a flower builder with botanical consistency checks, an atlas of 115 variant plates with a glossary, 82 angiosperm families (APG IV) with 278 species and their status in Mexico, a multi-access and a generated dichotomous key, self-assessment with piece-by-piece grading and verifiable teacher exams, gymnosperm strobili in 3D (cycads, Ginkgo, conifers, Ephedra) with 24 Mexican species, and a classroom mode to project presentations and print family sheets, worksheets, strobilus sheets and study cards.",
+  "version": "1.0.0",
+  "dateCreated": "2026-09-19",
+  "datePublished": "2026-09-19",
+  "license": "https://spdx.org/licenses/GPL-3.0-or-later",
+  "codeRepository": "https://github.com/luisangelbg/FloralPro",
+  "url": "https://luisangelbg.github.io/FloralPro/",
+  "programmingLanguage": ["JavaScript", "HTML", "CSS"],
+  "runtimePlatform": "Any modern web browser",
+  "operatingSystem": "Any",
+  "applicationCategory": "Botany education",
+  "inLanguage": ["es", "en"],
+  "keywords": ["botany", "floral morphology", "floral formula", "floral diagram", "plant systematics", "APG IV", "gymnosperms", "identification key", "science education", "Mexico"],
+  "author": [
+    {
+      "@type": "Person",
+      "givenName": "Luis Ángel",
+      "familyName": "Barrera-Guzmán",
+      "email": "lbarrerag@chapingo.mx",
+      "@id": "https://orcid.org/0000-0001-8057-2583"
+    }
+  ],
+  "softwareRequirements": ["A modern web browser; no installation"],
+  "isAccessibleForFree": true
+}

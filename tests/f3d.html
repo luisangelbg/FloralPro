@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>FloralPro — prueba de la flor 3D</title>
+<link rel="stylesheet" href="../css/labg-base.css">
+<link rel="stylesheet" href="../css/style.css">
+<style>
+  body { padding: 12px; }
+  .gal { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px; }
+  .gcard { background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; padding: 6px 8px; }
+  .gcard h3 { margin: 0; font-size: .9rem; }
+</style>
+</head>
+<body>
+<div class="gal" id="gal"></div>
+<script src="../js/i18n.js"></script>
+<script src="../js/model.js"></script>
+<script src="../js/formula.js"></script>
+<script src="../js/diagram.js"></script>
+<script src="../js/flower3d.js"></script>
+<script src="../js/specimens.js"></script>
+<script>
+  const qs = new URLSearchParams(location.search);
+  const ex = +(qs.get('ex') || 0), only = qs.get('only'), colors = qs.get('colors') || 'natural';
+  const az = +(qs.get('az') || -18), el = +(qs.get('el') || 32);
+  const gal = document.getElementById('gal');
+  for (const sp of SPECIMENS) for (const fl of sp.flowers) {
+    if (only && !only.split(',').includes(sp.id)) continue;
+    const d = document.createElement('div'); d.className = 'gcard';
+    d.innerHTML = `<h3><i>${sp.sci}</i> ${fl.label ? '— ' + fl.label.es : ''}</h3><div class="st"></div>`;
+    gal.appendChild(d);
+    Flower3D.mount(d.querySelector('.st'), fl.m, { explode: ex, colors, az, el, height: ex > 0 ? 420 : 300 });
+  }
+</script>
+</body>
+</html>

@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>FloralPro — pruebas del Bloque 2</title>
+<link rel="stylesheet" href="../css/labg-base.css">
+<link rel="stylesheet" href="../css/style.css">
+<style>
+  body { padding: 18px; max-width: 1100px; margin: 0 auto; }
+  .sum { font-size: 1.2rem; font-weight: 700; margin: 8px 0 14px; }
+  .ok { color: var(--success); } .bad { color: var(--danger); }
+  table { width: 100%; border-collapse: collapse; font-size: .82rem; }
+  td { border-bottom: 1px solid var(--border); padding: 3px 6px; vertical-align: top; }
+  td.r { width: 26px; text-align: center; font-weight: 700; }
+  code { font-family: var(--mono); font-size: .78rem; }
+  h2 { font-size: 1rem; margin: 18px 0 4px; }
+  iframe { width: 1300px; height: 900px; border: 1px solid var(--border); }
+</style>
+</head>
+<body>
+<h1>FloralPro — pruebas del Bloque 2 (Arma una flor)</h1>
+<p class="hint">La app se abre en el marco de abajo y las pruebas la manejan como lo haría un alumno: botones, casillas, números escritos, fórmulas tecleadas.
+  Necesita el servidor local (el navegador no deja manejar un marco abierto con doble clic).</p>
+<div class="sum" id="sum">…</div>
+<div id="out"></div>
+<iframe id="app" src="../index.html#b2"></iframe>
+<script>
+const results = [];
+let section = '';
+const sec = n => { section = n; };
+function ok(c, name, detail) { results.push({ section, pass: !!c, name, detail: detail || '' }); }
+function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+function eq(a, b, name) { ok(a === b, name, a === b ? '' : `obtenido <code>${esc(a)}</code><br>esperado <code>${esc(b)}</code>`); }
+
+document.getElementById('app').addEventListener('load', () => setTimeout(run, 400));
+
+function run() {
+  const W = document.getElementById('app').contentWindow, D = W.document;
+  /* the tests write in the browser storage (saved flowers, draft, language):
+     keep what was there and put it back at the end */
+  const KEEP = ['floralpro:myflowers', 'floralpro:draft', 'floralpro:lang', 'floralpro:conv', 'floralpro:colors'];
+  const kept = {};
+  KEEP.forEach(k => { kept[k] = W.localStorage.getItem(k); });
+  try { runTests(W, D); } finally {
+    KEEP.forEach(k => { if (kept[k] == null) W.localStorage.removeItem(k); else W.localStorage.setItem(k, kept[k]); });
+  }
+}
+function runTests(W, D) {
+  const { B2, Formula, FM, SPECIMENS } = W;
+  const q = s => D.querySelector(s);
+  const txt = (conv, o) => Formula.text(B2.S.m, conv || 'prenner', o || { bracts: true, ovules: true });
+  const clickAct = (act, attrs) => {
+    const sel = `#b2Editor [data-act="${act}"]` + Object.entries(attrs || {}).map(([k, v]) => `[data-${k}="${v}"]`).join('');
+    const b = q(sel);
+    if (!b) throw new Error('no hay botón ' + sel);
+    b.click();
+  };
+  const setInput = (p, value, ev) => {
+    const t = q(`#b2Editor [data-p="${p}"][data-t]`);
+    if (!t) throw new Error('no hay control ' + p);
+    if (t.type === 'checkbox') t.checked = value; else t.value = value;
+    t.dispatchEvent(new W.Event(ev || (t.type === 'checkbox' || t.tagName === 'SELECT' ? 'change' : 'input'), { bubbles: true }));
+  };
+  const tpl = id => { const s = q('#b2Tpl'); s.value = id; s.dispatchEvent(new W.Event('change', { bubbles: true })); };
+  const views = () => q('#b2Views .v-ftxt').textContent;
+  try {
+    /* ---------- 1. every example species survives the editor ---------- */
+    sec('1. Cada especie de ejemplo pasa por el editor sin cambiar');
+    SPECIMENS.forEach(sp => sp.flowers.forEach((fl, i) => {
+      tpl(`sp:${sp.id}:${i}`);
+      const name = sp.id + (sp.flowers.length > 1 ? i : '');
+      eq(txt('prenner'), Formula.text(fl.m, 'prenner', { bracts: true, ovules: true }), `${name}: fórmula de Prenner idéntica`);
+      eq(txt('classic', {}), Formula.text(fl.m, 'classic'), `${name}: fórmula clásica idéntica`);
+      const orgs = ['E', 'K', 'C', 'P', 'A', 'G'].filter(k => FM.normalize(fl.m)[k]);
+      eq([...D.querySelectorAll('#b2Editor .obox')].map(b => b.dataset.org).join(''), orgs.join(''), `${name}: el editor muestra una caja por verticilo presente`);
+      const c = B2.checks(B2.S.m).filter(x => x.lvl === 'warn');
+      ok(c.length === 0, `${name}: sin incoherencias botánicas`, c.map(x => x.es).join('; '));
+      ok(!/NaN|undefined/.test(q('#b2Views').innerHTML), `${name}: las vistas se dibujan sin NaN`);
+    }));
+
+    /* ---------- 2. actions ---------- */
+    sec('2. Botones y controles');
+    tpl('t-eudicot');
+    eq(txt('classic', {}), '✱ ⚥ K5 C5 A5+5 G(̲5̲)̲', 'Plantilla eudicotiledónea básica');
+    D.querySelector('#b2Editor [data-act="mero"][data-v="4"]').click();
+    eq(txt('classic', {}), '✱ ⚥ K4 C4 A4+4 G(̲4̲)̲', 'Merosidad 4 cambia todos los verticilos de 5');
+    clickAct('inc', { p: 'K.w.0.n' });
+    eq(FM.count(B2.S.m.K.w[0].n), 5, 'El botón + suma un sépalo');
+    clickAct('inf', { p: 'A.w.0.n' });
+    ok(FM.count(B2.S.m.A.w[0].n) === Infinity, 'El botón ∞ pone muchos estambres');
+    setInput('C.w.0.n', '4-6');
+    ok(JSON.stringify(B2.S.m.C.w[0].n) === '[4,6]', 'Escribir «4-6» da un intervalo', JSON.stringify(B2.S.m.C.w[0].n));
+    const before = JSON.stringify(B2.S.m);
+    setInput('C.w.0.n', 'abc');
+    ok(JSON.stringify(B2.S.m) === before && q('#b2Editor input[data-p="C.w.0.n"]').classList.contains('bad'), 'Un número inválido se marca y no cambia la flor');
+    setInput('C.w.0.connate', true);
+    ok(B2.S.m.C.w[0].connate === true && /C\(4–6\)/.test(txt()), 'Casilla «unidas» → C(4–6)', txt());
+    clickAct('split', { k: 'C', w: 0 });
+    ok(Array.isArray(B2.S.m.C.w[0].parts) && B2.S.m.C.w[0].parts.length === 2, 'Piezas desiguales divide el verticilo en dos grupos');
+    ok(/C\(\d:\d\)/.test(txt()), 'La fórmula de Prenner usa «:» para los grupos', txt());
+    clickAct('addpart', { k: 'C', w: 0 });
+    eq(B2.S.m.C.w[0].parts.length, 3, 'Añadir un grupo');
+    clickAct('unsplit', { k: 'C', w: 0 });
+    ok(!B2.S.m.C.w[0].parts, 'Volver a piezas iguales');
+    clickAct('addw', { k: 'K' });
+    eq(B2.S.m.K.w.length, 2, 'Añadir un verticilo al cáliz');
+    clickAct('delw', { k: 'K', w: 1 });
+    eq(B2.S.m.K.w.length, 1, 'Quitar el verticilo');
+
+    sec('3. Tipo de perianto, sexo y gineceo');
+    tpl('t-eudicot');
+    D.querySelector('#b2Editor [data-act="ptype"][data-v="homo"]').click();
+    ok(!B2.S.m.K && !B2.S.m.C && B2.S.m.P && B2.S.m.P.w.length === 2, 'Perigonio de tépalos: dos verticilos de P', txt());
+    D.querySelector('#b2Editor [data-act="ptype"][data-v="mono"]').click();
+    ok(B2.S.m.P && B2.S.m.P.w.length === 1 && FM.perianthType(FM.normalize(B2.S.m)) === 'mono', 'Un solo verticilo: monoclamídeo');
+    D.querySelector('#b2Editor [data-act="ptype"][data-v="none"]').click();
+    ok(!B2.S.m.K && !B2.S.m.C && !B2.S.m.P && FM.perianthType(FM.normalize(B2.S.m)) === 'none', 'Sin perianto: aclamídeo');
+    D.querySelector('#b2Editor [data-act="ptype"][data-v="hetero"]').click();
+    ok(B2.S.m.K && B2.S.m.C && !B2.S.m.P, 'Cáliz y corola otra vez');
+    D.querySelector('#b2Editor [data-act="sex"][data-v="staminate"]').click();
+    ok(/♂/.test(txt()) && B2.S.m.G.w[0].state === 'sterile', 'Estaminada: el gineceo pasa a pistilodio', txt());
+    ok(!B2.checks(B2.S.m).some(x => x.lvl === 'warn'), 'Estaminada con pistilodio: coherente');
+    D.querySelector('#b2Editor [data-act="sex"][data-v="bisexual"]').click();
+    setInput('_union', 'apo');
+    setInput('G.plac', 'parietal');
+    ok(B2.checks(B2.S.m).some(x => /parietal/.test(x.es) && x.lvl === 'warn'), 'Aviso: placentación parietal con carpelos libres');
+    setInput('_union', 'syn');
+    setInput('G.pos', 'inferior');
+    ok(/Ğ\(5\)/.test(txt()), 'Ovario ínfero → Ğ', txt());
+    setInput('_union', 'semi');
+    ok(/G5\^|Ğ5\^/.test(txt()) && FM.gynoeciumType(FM.normalize(B2.S.m)).type === 'semi', 'Estilos unidos, ovarios libres → G5^', txt());
+    D.querySelector('#b2Editor [data-act="hasG"][data-v="0"]').click();
+    ok(!B2.S.m.G, 'Sin gineceo');
+    ok(B2.checks(B2.S.m).some(x => /hermafrodita/.test(x.es)), 'Aviso: sin gineceo la flor no es hermafrodita');
+
+    sec('4. Androceo y adnación');
+    tpl('t-eudicot');
+    setInput('_epi', true);
+    ok(/\[C5 A5\+5\]/.test(txt()), 'Soldados a la corola → [C5 A5+5]', txt());
+    setInput('_gyno', true);
+    ok(/\{C5 A5\+5 G̲\(5\)\}/.test(txt()), 'Además unidos al gineceo → un solo grupo {C A G}', txt());
+    setInput('_gyno', false);
+    setInput('look.dyn', 'didynamous');
+    ok(B2.checks(B2.S.m).some(x => /didínamo/.test(x.es)), 'Aviso: didínamo con 10 estambres');
+    setInput('look.dyn', '');
+    setInput('G.replum', true);
+    ok(B2.checks(B2.S.m).some(x => /réplum/.test(x.es)), 'Aviso: réplum sin placentación parietal de dos carpelos');
+
+    sec('5. Deshacer y rehacer');
+    tpl('t-monocot');
+    const s0 = JSON.stringify(B2.S.m);
+    clickAct('inc', { p: 'A.w.0.n' });
+    clickAct('inc', { p: 'A.w.0.n' });
+    const s2 = JSON.stringify(B2.S.m);
+    q('#b2Undo').click(); q('#b2Undo').click();
+    eq(JSON.stringify(B2.S.m), s0, 'Dos «deshacer» regresan exactamente a la flor anterior');
+    q('#b2Redo').click(); q('#b2Redo').click();
+    eq(JSON.stringify(B2.S.m), s2, 'Dos «rehacer» vuelven a la última');
+    /* a slider dragged counts as one step */
+    tpl('t-sympet');
+    const s3 = JSON.stringify(B2.S.m);
+    const tube = q('#b2Editor [data-p="look.tube"]');
+    ['0.4', '0.5', '0.6', '0.7'].forEach(v => { tube.value = v; tube.dispatchEvent(new W.Event('input', { bubbles: true })); });
+    q('#b2Undo').click();
+    eq(JSON.stringify(B2.S.m), s3, 'Arrastrar el deslizador del tubo es un solo paso de «deshacer»');
+
+    sec('6. Construir desde una fórmula escrita');
+    const fin = q('#b2FInput');
+    fin.value = '↑ K(5) C1:2:(2) A(9):1 G1'; q('#b2Build').click();
+    ok(B2.S.m.sym === 'zygo' && B2.S.m.C.w[0].parts.length === 3 && FM.gynoeciumType(FM.normalize(B2.S.m)).type === 'mono', 'Fórmula de leguminosa → zigomorfa, corola en 3 grupos, monocarpelar');
+    ok(/Flor construida/.test(q('#b2FMsg').textContent), 'Mensaje de confirmación');
+    fin.value = '✱ P3+3 A3+3 G(3) inf'; q('#b2Build').click();
+    ok(B2.S.m.P && B2.S.m.G.pos === 'inferior', 'Fórmula de monocotiledónea con ovario ínfero');
+    fin.value = 'hola'; q('#b2Build').click();
+    ok(/No encontré/.test(q('#b2FMsg').textContent) && B2.S.m.P, 'Una fórmula sin verticilos no cambia la flor y avisa');
+    /* keyboard */
+    fin.value = ''; fin.focus(); fin.setSelectionRange(0, 0);
+    ['✱', 'K', '(', ')', '⌫'].forEach(k => D.querySelector(`#b2Keys .kb[data-k="${k}"]`).click());
+    eq(fin.value, '✱ K(', 'El teclado de símbolos escribe y borra en el cursor');
+
+    sec('7. Guardar, archivo y enlace');
+    tpl('sp:phaseolus:0');
+    q('#b2Name').value = 'Frijol de prueba ñandú'; q('#b2Name').dispatchEvent(new W.Event('input'));
+    q('#b2Save').click();
+    const saved = JSON.parse(W.localStorage.getItem('floralpro:myflowers'));
+    ok(saved[0].name === 'Frijol de prueba ñandú' && Formula.text(saved[0].m, 'prenner') === Formula.text(B2.S.m, 'prenner'), 'Guardar en «Mis flores»');
+    tpl('t-naked');
+    D.querySelector('#b2SavedList .sv-load').click();
+    ok(Formula.text(B2.S.m, 'prenner') === Formula.text(SPECIMENS.find(s => s.id === 'phaseolus').flowers[0].m, 'prenner'), 'Abrir la flor guardada');
+    let allLinks = true;
+    SPECIMENS.forEach(sp => sp.flowers.forEach(fl => {
+      const code = B2.encodeModel(B2.toEditable(fl.m));
+      const back = B2.decodeModel(code);
+      if (Formula.text(back.m, 'prenner', { bracts: true, ovules: true }) !== Formula.text(fl.m, 'prenner', { bracts: true, ovules: true }) || /[+/=]/.test(code)) allLinks = false;
+    }));
+    ok(allLinks, 'El enlace para compartir codifica y decodifica las 13 flores sin pérdida (y sin caracteres que rompan la dirección)');
+    const back = B2.decodeModel(B2.encodeModel(B2.S.m));
+    eq(back.n, 'Frijol de prueba ñandú', 'El nombre con acentos y ñ viaja en el enlace');
+
+    sec('8. Idioma y convención');
+    W.I18N.set('en');
+    ok(/Calyx/.test(q('#b2Editor').textContent) && /Whorl 1/.test(q('#b2Editor').textContent), 'El editor cambia a inglés');
+    W.I18N.set('es');
+    W.setConv('classic');
+    ok(/^↑ ⚥/.test(views()), 'La fórmula de las vistas sigue la convención elegida (clásica)', views());
+    W.setConv('prenner');
+    ok(/^↓/.test(views()), '…y la de Prenner', views());
+    W.setConv('classic');
+  } catch (e) {
+    ok(false, 'Error durante las pruebas: ' + e.message, esc(e.stack || ''));
+  }
+  const bad = results.filter(r => !r.pass);
+  document.getElementById('sum').innerHTML = `<span class="${bad.length ? 'bad' : 'ok'}">${results.length - bad.length} de ${results.length} pruebas correctas</span>`;
+  let html = '', cur = '';
+  for (const r of results) {
+    if (r.section !== cur) { if (cur) html += '</table>'; cur = r.section; html += `<h2>${esc(cur)}</h2><table>`; }
+    html += `<tr><td class="r ${r.pass ? 'ok' : 'bad'}">${r.pass ? '✓' : '✗'}</td><td>${esc(r.name)}${r.detail ? '<br>' + r.detail : ''}</td></tr>`;
+  }
+  document.getElementById('out').innerHTML = html + '</table>';
+  document.title = `${results.length - bad.length}/${results.length} — pruebas Bloque 2`;
+}
+</script>
+</body>
+</html>

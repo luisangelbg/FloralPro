@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>FloralPro — pruebas del Bloque 8</title>
+<link rel="stylesheet" href="../css/labg-base.css">
+<link rel="stylesheet" href="../css/style.css">
+<style>
+  body { padding: 18px; max-width: 1100px; margin: 0 auto; }
+  .sum { font-size: 1.2rem; font-weight: 700; margin: 8px 0 14px; }
+  .ok { color: var(--success); } .bad { color: var(--danger); }
+  table { width: 100%; border-collapse: collapse; font-size: .82rem; }
+  td { border-bottom: 1px solid var(--border); padding: 3px 6px; vertical-align: top; }
+  td.r { width: 26px; text-align: center; font-weight: 700; }
+  h2 { font-size: 1rem; margin: 18px 0 4px; }
+  iframe { width: 1300px; height: 900px; border: 1px solid var(--border); }
+  .note { font-size: .8rem; color: var(--text-muted); }
+</style>
+</head>
+<body>
+<h1>FloralPro — pruebas del Bloque 8 (Modo clase)</h1>
+<div class="sum" id="sum">…</div>
+<div id="out"></div>
+<iframe id="app" src="../index.html#b8"></iframe>
+<script>
+const results = [];
+let section = '';
+const sec = n => { section = n; };
+function ok(c, name, detail) { results.push({ section, pass: !!c, name, detail: detail || '' }); }
+function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+const wait = ms => new Promise(r => setTimeout(r, ms));
+document.getElementById('app').addEventListener('load', () => setTimeout(run, 800));
+
+async function run() {
+  const W = document.getElementById('app').contentWindow, D = W.document;
+  const KEEP = ['floralpro:talks', 'floralpro:lang', 'floralpro:plDark'];
+  const kept = {}; KEEP.forEach(k => { kept[k] = W.localStorage.getItem(k); });
+  const added = [];
+  try { await tests(W, D, added); } catch (e) { ok(false, 'Error: ' + e.message, esc(e.stack || '')); }
+  finally {
+    try { if (W.B8.S.play) W.B8.closePlayer(); } catch (e) { /* ignore */ }
+    for (const id of added) { try { await W.Photos.remove(id); } catch (e) { /* ignore */ } }
+    KEEP.forEach(k => { if (kept[k] == null) W.localStorage.removeItem(k); else W.localStorage.setItem(k, kept[k]); });
+  }
+  report();
+}
+/* a small made-up photo drawn on a canvas */
+async function fakePhoto(W, name, w, h) {
+  const cv = W.document.createElement('canvas'); cv.width = w || 2400; cv.height = h || 1800;
+  const x = cv.getContext('2d'); x.fillStyle = '#6a8a4a'; x.fillRect(0, 0, cv.width, cv.height);
+  x.fillStyle = '#e0a0c8'; x.beginPath(); x.arc(cv.width / 2, cv.height / 2, cv.height / 4, 0, 7); x.fill();
+  x.fillStyle = '#' + Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, '0'); x.fillRect(10, 10, 60, 60);
+  const b = await new Promise(r => cv.toBlob(r, 'image/jpeg', 0.9));
+  return new W.File([b], name || 'foto.jpg', { type: 'image/jpeg' });
+}
+
+async function tests(W, D, added) {
+  const { B8, Photos, FAMILIES, Fam, GYMNO, ATLAS, I18N, QUIZ } = W;
+  const $ = s => D.querySelector(s), $$ = s => [...D.querySelectorAll(s)];
+  const vis = n => n && W.getComputedStyle(n).display !== 'none';
+  const click = n => n && n.dispatchEvent(new W.MouseEvent('click', { bubbles: true }));
+  const key = k => D.dispatchEvent(new W.KeyboardEvent('keydown', { key: k, bubbles: true }));
+  if (I18N.lang !== 'es') I18N.set('es');
+  W.goStep(8);
+  await Photos.ready;
+
+  sec('1. Presentaciones');
+  ok($('#panel-8').classList.contains('active') && !$('.step-btn[data-step="8"] .soon') && vis($('#p8Class')), 'El bloque 8 está listo y abre en la presentación');
+  B8.act('new');
+  const t = B8.S.talks[B8.S.cur];
+  t.title = 'Prueba de clase';
+  t.slides.push(
+    { k: 'flower', ref: { fam: 'liliaceae', fi: 0 }, mode: 'fam' },
+    { k: 'flower', ref: { fam: 'solanaceae', fi: 0 }, mode: 'formula' },
+    { k: 'flower', ref: { fam: 'fabaceae', fi: 0 }, mode: 'diagram' },
+    { k: 'plate', id: 'plac-parietal', mode: 'term' },
+    { k: 'strob', id: 'pinus-f', stage: 'mat', mode: 'group' },
+    { k: 'cmp', a: { fam: 'liliaceae', fi: 0 }, b: { fam: 'amaryllidaceae', fi: 0 }, mode: 'show' },
+    { k: 'text', title: 'Monocotiledóneas', body: 'Flores trímeras\nHojas de nervación paralela', mode: 'show' });
+  B8.showTab('class');
+  ok($$('#p8List li').length === 7 && /Liliaceae/.test($('#p8List').textContent) && /Parietal/.test($('#p8List').textContent), 'La lista muestra las 7 diapositivas con sus nombres');
+  /* adding with the form */
+  click($('#p8Kinds button[data-k="flower"]'));
+  $('#p8Fam').value = 'cactaceae'; $('#p8Fam').dispatchEvent(new W.Event('change', { bubbles: true }));
+  $('#p8Mode').value = 'fam';
+  click($('[data-p8="add"]'));
+  ok(B8.S.talks[B8.S.cur].slides.length === 8 && B8.S.talks[B8.S.cur].slides[7].ref.fam === 'cactaceae' && B8.S.talks[B8.S.cur].slides[7].mode === 'fam', 'El formulario añade una flor con su modo (Cactaceae, preguntar la familia)');
+  click($('#p8Kinds button[data-k="plate"]'));
+  const nPl = ATLAS.PLATES.filter(p => p.sec === $('#p8Sec').value).length;
+  click($('[data-p8="addsec"]'));
+  ok(B8.S.talks[B8.S.cur].slides.length === 8 + nPl, `«Añadir toda la sección» añade sus ${nPl} láminas`);
+  B8.S.talks[B8.S.cur].slides.splice(8, nPl);
+  const round = B8.genRound(8, 'basic', 'fam');
+  ok(round.length === 8 && new Set(round.map(s => s.ref.fam)).size === 8 && round.every(s => s.mode === 'fam' && Fam.allFlowers(Fam.byId(s.ref.fam))[s.ref.fi]), 'Una ronda de 8 flores al azar, de 8 familias distintas, preguntando la familia');
+  B8.showTab('class');
+  click($('#p8List [data-mv="1"][data-i="0"]'));
+  ok(B8.S.talks[B8.S.cur].slides[1].ref.fam === 'liliaceae' && B8.S.talks[B8.S.cur].slides[0].ref.fam === 'solanaceae', 'Las flechas cambian el orden');
+  click($('#p8List [data-mv="-1"][data-i="1"]'));
+  const sel = $('#p8List .p8-mode[data-i="1"]'); sel.value = 'show'; sel.dispatchEvent(new W.Event('change', { bubbles: true }));
+  ok(B8.S.talks[B8.S.cur].slides[1].mode === 'show', 'El modo de cada diapositiva se cambia en la lista');
+  sel.value = 'formula'; sel.dispatchEvent(new W.Event('change', { bubbles: true }));
+  const saved = JSON.parse(W.localStorage.getItem('floralpro:talks'));
+  ok(saved && saved.some(x => x.title === 'Prueba de clase' && x.slides.length === 8), 'Las presentaciones se guardan en el navegador');
+  const link = B8.b64u(JSON.stringify({ title: 'Recibida por enlace', slides: t.slides }));
+  ok(JSON.parse(B8.unb64u(link)).slides.length === 8 && B8.validTalk(JSON.parse(B8.unb64u(link))) && !B8.validTalk({ title: 'x', slides: [{ k: 'raro' }] }), 'El enlace guarda la presentación completa y se rechaza lo que no es una presentación');
+  const before = B8.S.talks.length;
+  W.location.hash = '#b8&p=' + link;
+  await wait(200);
+  ok(B8.S.talks.length === before + 1 && B8.S.talks[0].title === 'Recibida por enlace' && B8.S.talks[0].slides.length === 8 && W.location.hash === '#b8', 'Abrir un enlace #b8&p=… añade la presentación recibida');
+  W.location.hash = '#b8&p=' + link; await wait(200);
+  ok(B8.S.talks.length === before + 1, 'Abrir dos veces el mismo enlace no la duplica');
+  B8.S.talks.shift(); B8.S.cur = B8.S.talks.findIndex(x => x.title === 'Prueba de clase');
+
+  sec('2. Proyectar');
+  B8.play(0);
+  const P = $('#p8Player');
+  ok(P && W.getComputedStyle(P).position === 'fixed' && D.body.classList.contains('playing'), 'Presentar abre el proyector sobre toda la pantalla');
+  ok(/familia/.test($('.pl-t').textContent) && !/Liliaceae/.test($('.pl-t').textContent) && $('.pl-3d svg') && $('.pl-paper svg.fdiagram') && /1 \/ 8/.test($('.pl-n').textContent), 'Diapositiva 1: pregunta la familia y oculta el nombre; flor en 3D, diagrama y corte');
+  key('ArrowRight');
+  ok(/Liliaceae/.test($('.pl-t').textContent) && B8.S.play.i === 0 && B8.S.play.rev, '→ revela la respuesta sin avanzar');
+  key(' ');
+  ok(B8.S.play.i === 1 && $('.pl-hide .pl-formula') && !$('.pl-hide.shown'), 'La barra espaciadora avanza; la diapositiva 2 oculta la fórmula');
+  key('r');
+  ok($('.pl-hide.shown .pl-formula'), 'R revela la fórmula');
+  key('ArrowRight');
+  ok(B8.S.play.i === 2 && $('.pl-hide.pl-hfig .pl-3d') && $('.pl-formula') && !$('.pl-hide .pl-formula'), 'Diapositiva 3: muestra la fórmula y oculta el diagrama y la flor');
+  key('ArrowRight'); key('ArrowRight');
+  const plateHasArt = $$('.pl-plate .pl-paper').length;
+  ok(B8.S.play.i === 3 && /Cómo se llama/.test($('.pl-t').textContent) && plateHasArt >= 1 && $('.pl-hide .pl-def'), 'Lámina: pregunta el término y oculta la definición');
+  key('ArrowRight'); key('ArrowRight');
+  ok(B8.S.play.i === 4 && $('.pl-3d svg.c3d') && $('.pl-paper svg.cfig') && /grupo/.test($('.pl-t').textContent), 'Estróbilo: pregunta el grupo, con el cono en 3D y el corte');
+  key('ArrowRight'); key('ArrowRight');
+  ok(B8.S.play.i === 5 && $$('.pl-side').length === 2 && $$('.pl-side .pl-3d svg').length === 2, 'Comparación: dos flores lado a lado');
+  key('ArrowRight');
+  ok(B8.S.play.i === 6 && /Monocotiledóneas/.test($('.pl-text h2').textContent) && $$('.pl-text p').length === 2, 'Diapositiva de texto con dos párrafos');
+  key('ArrowLeft');
+  ok(B8.S.play.i === 5, '← regresa');
+  key('b');
+  ok(P.classList.contains('blank'), 'B oscurece la pantalla');
+  key('b');
+  key('End');
+  ok(B8.S.play.i === 7 && /familia/.test($('.pl-t').textContent), 'Fin lleva a la última diapositiva');
+  click($('[data-pl="exit"]'));
+  ok(!$('#p8Player') && !D.body.classList.contains('playing'), '«Salir» cierra el proyector');
+  B8.play(3);
+  ok(B8.S.play.i === 3, '«Presentar desde aquí» empieza en la diapositiva elegida');
+  key('Escape');
+  ok(!$('#p8Player'), 'Esc sale del proyector');
+
+  sec('3. Fichas para imprimir');
+  B8.showTab('print');
+  ok($$('#p8PK button').length === 4 && $$('#p8Print input[name="p8pf"]').length === FAMILIES.length, 'Cuatro tipos de ficha; las 82 familias para elegir');
+  $$('#p8Print input[name="p8pf"]').forEach(i => { i.checked = ['liliaceae', 'cactaceae'].includes(i.value); });
+  B8.preview();
+  let pages = $$('#p8Pages .pp-page');
+  ok(pages.length === 2 && /Liliaceae/.test(pages[0].textContent) && pages[0].querySelectorAll('svg').length >= 3 && pages[0].querySelector('.pp-formula .ff') && pages[0].querySelector('.pp-tab') && /Caracteres distintivos/.test(pages[0].textContent), 'Ficha de familia: una hoja por familia con 3D, diagrama, corte, fórmula, caracteres y especies');
+  $('#p8BothConv').checked = true; B8.preview();
+  ok($$('#p8Pages .pp-page')[0].querySelectorAll('.pp-formula .ff').length === 2, 'Opción: fórmula en las dos convenciones');
+  click($('#p8Paper button[data-v="a4"]'));
+  ok($('#p8Pages .pp-page.pp-a4'), 'Papel A4');
+  click($('#p8Paper button[data-v="letter"]'));
+  const done = B8.preparePrint();
+  ok(D.body.classList.contains('printing') && $$('#printArea .pp-page').length === 2 && /size: 216mm 279mm/.test($('#p8PageStyle').textContent), 'Al imprimir, las hojas pasan a un área propia con tamaño carta');
+  done();
+  ok(!D.body.classList.contains('printing') && !$('#printArea').innerHTML, 'Después de imprimir, la página vuelve a la normalidad');
+  click($('#p8PK button[data-pk="work"]'));
+  $('#p8WN').value = '8';
+  $$('#p8Print input[name="p8wx"]').forEach(i => { i.checked = true; });
+  B8.preview();
+  pages = $$('#p8Pages .pp-page');
+  const exs = $$('#p8Pages .pp-ex'), keyItems = $$('#p8Pages .pp-key > li');
+  ok(exs.length === 8 && keyItems.length === 8 && /Clave de respuestas/.test(pages[pages.length - 1].textContent) && /Nombre/.test(pages[0].textContent), 'Hoja de trabajo: 8 ejercicios con su clave aparte y campos para nombre y grupo');
+  ok($$('#p8Pages .pp-blank').length === 2 && exs.some(e => /1\. ______/.test(e.textContent)) && /1\. /.test(keyItems.map(k => k.textContent).join(' ')), 'Plantilla en blanco para dibujar el diagrama y partes numeradas con su respuesta en la clave');
+  const k1 = keyItems.map(k => k.textContent).join('|');
+  B8.preview();
+  ok($$('#p8Pages .pp-key > li').map(k => k.textContent).join('|') === k1, 'La misma variante da las mismas flores');
+  click($('[data-p8="reseed"]'));
+  ok($$('#p8Pages .pp-key > li').map(k => k.textContent).join('|') !== k1 && $('#p8WN').value === '8', '«Otra variante» cambia las flores y conserva las opciones');
+  click($('#p8PK button[data-pk="strob"]'));
+  $$('#p8Print input[name="p8px"]').forEach(i => { i.checked = ['pinus', 'taxus'].includes(i.value); });
+  B8.preview();
+  pages = $$('#p8Pages .pp-page');
+  ok(pages.length === 2 && /Pinus pseudostrobus/.test(pages[0].textContent) && pages[0].querySelectorAll('svg.cfig').length >= 3 && pages[0].querySelectorAll('.pp-kv').length === 2, 'Ficha de estróbilo: vistas y dos tablas de caracteres (femenino y masculino)');
+  click($('#p8PK button[data-pk="cards"]'));
+  $$('#p8Print input[name="p8cs"]').forEach(i => { i.checked = i.value === 'fam'; });
+  B8.preview();
+  pages = $$('#p8Pages .pp-page');
+  const nCardPages = Math.ceil(FAMILIES.length / 8) * 2;
+  const front = pages[0].querySelectorAll('.pp-card'), back = pages[1].querySelectorAll('.pp-card');
+  ok(pages.length === nCardPages && front.length === 8 && back.length === 8, `Tarjetas: ${FAMILIES.length} familias en ${nCardPages} hojas (frentes y reversos)`);
+  ok(/Nymphaeaceae/.test(back[1].textContent) && /Magnoliaceae/.test(back[0].textContent), 'El reverso va en espejo: detrás de la primera tarjeta queda su respuesta al voltear por el lado largo');
+
+  sec('4. Mis fotos');
+  const f1 = await fakePhoto(W, 'lirio.jpg', 2400, 1800);
+  const r1 = await Photos.add([f1], { fam: 'liliaceae', sp: 'Lilium longiflorum', plate: 'plac-axile', author: 'Prueba', lic: 'CC BY 4.0' });
+  r1.added.forEach(p => added.push(p.id));
+  const p1 = r1.added[0];
+  const mx = Photos.S.ls ? 1000 : 1600;
+  ok(p1 && p1.w === mx && p1.h === mx * 0.75 && /^data:image\/jpeg/.test(p1.src) && p1.th && p1.th.length < p1.src.length, `Una foto de 2400 × 1800 se reduce a ${mx} × ${mx * 0.75}, con miniatura (${Photos.S.db ? 'IndexedDB' : Photos.S.ls ? 'almacenamiento local, por abrirse como archivo' : 'memoria'})`);
+  if (Photos.S.ls) ok(JSON.parse(W.localStorage.getItem('floralpro:photos')).some(p => p.id === p1.id), 'Sin IndexedDB, la foto queda en el almacenamiento local del navegador');
+  const r2 = await Photos.add([f1]);
+  ok(r2.added.length === 0, 'La misma foto no se guarda dos veces');
+  const bad = await Photos.add([new W.File(['hola'], 'nota.txt', { type: 'text/plain' })]);
+  ok(bad.added.length === 0 && bad.bad.includes('nota.txt'), 'Un archivo que no es imagen se rechaza con su nombre');
+  ok(Photos.forFamily('liliaceae').some(p => p.id === p1.id) && Photos.forPlate('plac-axile').length === 1 && Photos.forSpecies('Lilium longiflorum').length === 1, 'Se encuentra por familia, especie y lámina');
+  await Photos.update(p1.id, { cap: 'Flor de azucena', place: 'Texcoco' });
+  ok(Photos.byId(p1.id).cap === 'Flor de azucena' && /Prueba · CC BY 4.0/.test(Photos.credit(Photos.byId(p1.id))), 'Se editan pie, lugar y créditos');
+  const pkg = Photos.packageText([p1.id]);
+  ok(/^\/\* FloralPro/.test(pkg) && /window\.FLORALPRO_PHOTOS = \{/.test(pkg) && JSON.parse(pkg.slice(pkg.indexOf('{'), pkg.lastIndexOf('}') + 1)).photos.length === 1, 'El paquete es un archivo fotos.js que la app puede cargar');
+  const imp = await Photos.importText(pkg);
+  ok(imp.added === 0 && imp.dup === 1, 'Importar un paquete no duplica las fotos que ya están');
+  let err = null; try { await Photos.importText('no es un paquete'); } catch (e) { err = e; }
+  ok(err, 'Un archivo que no es paquete se rechaza');
+  B8.S.phSel = p1.id; B8.showTab('photos');
+  ok($$('#p8PhGrid .p8-ph').length >= 1 && $('#p8PhFam').value === 'liliaceae' && $('#p8PhSp').value === 'Lilium longiflorum' && $('#p8PhCap').value === 'Flor de azucena', 'La pestaña muestra la foto y su ficha para editar');
+  $('#p8PhCap').value = 'Azucena en flor';
+  click($('[data-p8="phsave"]'));
+  await wait(150);
+  ok(Photos.byId(p1.id).cap === 'Azucena en flor', '«Guardar» actualiza la foto');
+  /* the photo in the other blocks */
+  W.B4.openFamily('liliaceae');
+  await wait(100);
+  ok(vis($('#b4Ph')) && $('#b4Ph .ph-th img'), 'Bloque 4: la ficha de Liliaceae muestra la foto');
+  click($('#b4Ph .ph-th'));
+  ok($('.ph-dlg') && $('.ph-dlg').open && /Azucena en flor/.test($('.ph-dlg figcaption').textContent) && /CC BY 4.0/.test($('.ph-dlg figcaption').textContent), 'Al hacer clic se abre en grande con pie y créditos');
+  $('.ph-dlg').close();
+  W.B3.openPlate('plac-axile');
+  ok($('#b3DlgText .ph-strip'), 'Bloque 3: la lámina de placentación axilar muestra la foto que la ilustra');
+  $('#b3Dlg').close();
+  const f2 = await fakePhoto(W, 'pino.jpg', 900, 1200);
+  const r3 = await Photos.add([f2], { gym: 'pinus', sp: 'Pinus pseudostrobus' });
+  r3.added.forEach(p => added.push(p.id));
+  W.B7.goExample('pinus', 'f', 'mat');
+  await wait(100);
+  ok(vis($('#g7Ph')) && $('#g7Ph .ph-th'), 'Bloque 7: el ejemplo del pino muestra su foto');
+  W.goStep(8);
+  B8.S.talks[B8.S.cur].slides.push({ k: 'photo', id: p1.id, mode: 'fam' });
+  B8.play(B8.S.talks[B8.S.cur].slides.length - 1);
+  ok($('.pl-photo img') && $('.pl-hide figcaption') && !/Lilium/.test($('.pl-t').textContent), 'Diapositiva de foto: pregunta qué es y oculta el pie');
+  key('ArrowRight');
+  ok(/Lilium longiflorum/.test($('.pl-t').textContent) && $('.pl-hide.shown'), 'Al revelar aparecen la especie y el pie');
+  B8.closePlayer();
+  B8.showTab('print');
+  click($('#p8PK button[data-pk="fam"]'));
+  $$('#p8Print input[name="p8pf"]').forEach(i => { i.checked = i.value === 'liliaceae'; });
+  B8.preview();
+  ok($('#p8Pages .pp-photos img'), 'La ficha de familia impresa incluye la foto');
+  click($('#p8PK button[data-pk="cards"]'));
+  $$('#p8Print input[name="p8cs"]').forEach(i => { i.checked = i.value === 'fam'; });
+  B8.preview();
+  ok($$('#p8Pages .pp-cimg').length >= 1, 'Las tarjetas usan la foto al frente cuando existe');
+
+  sec('5. Acerca de, idioma y teléfono');
+  click($('#aboutBtn'));
+  ok($('#aboutDlg').open && /Barrera-Guzmán/.test($('#aboutCite').textContent) && /1\.0\.0/.test($('#aboutCite').textContent), '«Acerca de» muestra la versión y cómo citar la app');
+  $('#aboutDlg').close();
+  I18N.set('en');
+  B8.showTab('class');
+  ok(/Slides/.test($('#p8Class').textContent) && /Present/.test($('[data-p8="play"]').textContent), 'En inglés');
+  B8.showTab('print');
+  ok(/Family sheet/.test($('#p8PK').textContent), 'Las fichas también en inglés');
+  I18N.set('es');
+  for (const tab of ['class', 'print', 'photos']) {
+    const fr = document.createElement('iframe');
+    fr.style.cssText = 'width:390px;height:800px';
+    document.body.appendChild(fr);
+    fr.src = '../index.html?w=' + tab + '#b8';
+    await new Promise(r => { fr.onload = r; });
+    await wait(500);
+    fr.contentWindow.B8.showTab(tab);
+    await wait(200);
+    const M = fr.contentWindow.document;
+    const o = M.documentElement.scrollWidth - M.documentElement.clientWidth;
+    ok(o <= 0, `Sin desbordamiento horizontal a 390 px (pestaña ${tab})`, o > 0 ? o + ' px' : '');
+    fr.remove();
+  }
+}
+
+function report() {
+  const bad = results.filter(r => !r.pass), n = results.length;
+  const sum = document.getElementById('sum');
+  sum.innerHTML = bad.length ? `<span class="bad">${bad.length} de ${n} pruebas fallan</span>` : `<span class="ok">Las ${n} pruebas pasan</span>`;
+  sum.dataset.pass = n - bad.length; sum.dataset.fail = bad.length;
+  let h = '', cur = null;
+  results.forEach(r => {
+    if (r.section !== cur) { if (cur !== null) h += '</table>'; h += `<h2>${r.section}</h2><table>`; cur = r.section; }
+    h += `<tr><td class="r ${r.pass ? 'ok' : 'bad'}">${r.pass ? '✓' : '✗'}</td><td>${r.name}${r.detail ? `<div class="note">${r.detail}</div>` : ''}</td></tr>`;
+  });
+  document.getElementById('out').innerHTML = h + '</table>';
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>FloralPro — pruebas del Bloque 7</title>
+<link rel="stylesheet" href="../css/labg-base.css">
+<link rel="stylesheet" href="../css/style.css">
+<style>
+  body { padding: 18px; max-width: 1100px; margin: 0 auto; }
+  .sum { font-size: 1.2rem; font-weight: 700; margin: 8px 0 14px; }
+  .ok { color: var(--success); } .bad { color: var(--danger); }
+  table { width: 100%; border-collapse: collapse; font-size: .82rem; }
+  td { border-bottom: 1px solid var(--border); padding: 3px 6px; vertical-align: top; }
+  td.r { width: 26px; text-align: center; font-weight: 700; }
+  h2 { font-size: 1rem; margin: 18px 0 4px; }
+  iframe { width: 1300px; height: 900px; border: 1px solid var(--border); }
+  .note { font-size: .8rem; color: var(--text-muted); }
+</style>
+</head>
+<body>
+<h1>FloralPro — pruebas del Bloque 7 (Gimnospermas)</h1>
+<div class="sum" id="sum">…</div>
+<div id="out"></div>
+<iframe id="app" src="../index.html#b7"></iframe>
+<script>
+const results = [];
+let section = '';
+const sec = n => { section = n; };
+function ok(c, name, detail) { results.push({ section, pass: !!c, name, detail: detail || '' }); }
+function info(name, detail) { results.push({ section, pass: true, info: true, name, detail: detail || '' }); }
+function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+const wait = ms => new Promise(r => setTimeout(r, ms));
+document.getElementById('app').addEventListener('load', () => setTimeout(run, 700));
+
+async function run() {
+  const W = document.getElementById('app').contentWindow, D = W.document;
+  const lang0 = W.localStorage.getItem('floralpro:lang');
+  try { dataTests(W); drawTests(W); await uiTests(W, D); } catch (e) { ok(false, 'Error: ' + e.message, esc(e.stack || '')); }
+  finally { if (lang0 == null) W.localStorage.removeItem('floralpro:lang'); else W.localStorage.setItem('floralpro:lang', lang0); }
+  report();
+}
+const STAGES = s => s.sex === 'f' ? ['pol', 'mat'] : ['mat'];
+const hasNaN = s => /NaN|undefined|Infinity/.test(s);
+
+function dataTests(W) {
+  const { GYMNO, CM, B3, Fam } = W;
+  sec('1. Datos');
+  const probs = [];
+  GYMNO.EXAMPLES.forEach(e => {
+    if (!GYMNO.byId(e.id + '-f') || !GYMNO.byId(e.id + '-m')) probs.push(e.id + ': le falta una estructura');
+    if (!GYMNO.grpById(e.grp)) probs.push(e.id + ': familia desconocida');
+    if (!Fam.ST[e.st] || !['mono', 'dio'].includes(e.sys)) probs.push(e.id + ': estatus o sistema sexual');
+  });
+  GYMNO.STROBILI.forEach(s => { if (!GYMNO.exById(s.ex)) probs.push(s.id + ': ejemplo desconocido'); if (!CM.W.struct[s.struct]) probs.push(s.id + ': estructura desconocida'); });
+  GYMNO.SPECIES.forEach(s => {
+    if (!GYMNO.grpById(s.grp) || !GYMNO.exById(s.ex) || GYMNO.exById(s.ex).grp !== s.grp) probs.push(s.sci + ': familia o ejemplo');
+    if (!Fam.ST[s.st]) probs.push(s.sci + ': estatus');
+    if (s.nom && !['P', 'A', 'Pr', 'E'].includes(s.nom)) probs.push(s.sci + ': categoría NOM');
+    if (!s.note || !s.note.es || !s.note.en) probs.push(s.sci + ': nota');
+  });
+  ok(!probs.length, `${GYMNO.GROUPS.length} familias, ${GYMNO.EXAMPLES.length} ejemplos con sus dos estructuras (${GYMNO.STROBILI.length} modelos) y ${GYMNO.SPECIES.length} especies, bien enlazados`, probs.join('<br>'));
+  const lin = new Set(GYMNO.GROUPS.map(g => g.lin));
+  ok(['cycads', 'ginkgo', 'conifers', 'gnetales'].every(l => lin.has(l)) && GYMNO.SPECIES.filter(s => s.st === 'end' || s.st === 'nat').length >= 18, 'Los cuatro linajes vivos y al menos 18 especies nativas o endémicas');
+  const orgBad = [];
+  GYMNO.STROBILI.forEach(s => STAGES(s).forEach(st => {
+    const o = CM.organs(s, st);
+    if (!o.length) orgBad.push(s.id + ' ' + st + ': sin partes');
+    o.forEach(k => { if (!GYMNO.ORG[k] || !GYMNO.ORG[k].es || !GYMNO.ORG[k].en) orgBad.push(s.id + ': parte sin nombre ' + k); });
+  }));
+  ok(!orgBad.length, 'Cada estructura tiene sus partes, todas con nombre en español y en inglés', orgBad.join('<br>'));
+  const noDef = Object.values(GYMNO.ORG).filter(o => o.term && !B3.lookup(o.term)).map(o => o.term);
+  ok(!noDef.length, 'Cada parte con término tiene definición en el glosario del atlas', noDef.join(', '));
+  const gl = Object.keys(GYMNO.GLOSS).filter(k => !B3.lookup(k));
+  ok(!gl.length && B3.glossaryEntries().length > 150, `Los ${Object.keys(GYMNO.GLOSS).length} términos de gimnospermas se sumaron al glosario (${B3.glossaryEntries().length} entradas)`, gl.join(', '));
+  const txt = [];
+  GYMNO.STROBILI.forEach(s => STAGES(s).forEach(st => {
+    const a = CM.sheet(s, 'es'), b = CM.sheet(s, 'en'), da = CM.describe(s, st, 'es'), db = CM.describe(s, st, 'en');
+    if (a.length !== b.length || a.length < 6) txt.push(s.id + ': ficha incompleta');
+    if (da.length !== db.length || da.length < 2) txt.push(s.id + ': descripción incompleta');
+    const all = JSON.stringify([a, b, da, db]);
+    if (/undefined|NaN|null|\[object/.test(all)) txt.push(s.id + ' ' + st + ': texto roto');
+    [da, db].forEach(d => d.forEach(p => { (p.html.match(/data-term="([^"]+)"/g) || []).forEach(t => { const k = t.slice(11, -1); if (!B3.lookup(k)) txt.push(s.id + ': término sin definición ' + k); }); }));
+  }));
+  ok(!txt.length, 'Fichas y descripciones completas en los dos idiomas; todo término subrayado tiene definición', [...new Set(txt)].join('<br>'));
+  const pinus = CM.sheet(GYMNO.byId('pinus-f'), 'es').map(r => r.k + ': ' + r.v).join(' | ');
+  ok(/Monoica/.test(pinus) && /compuesto/.test(pinus) && /dos óvulos invertidos/.test(pinus) && /Unos 2 años/.test(pinus) && /Con ala/.test(pinus), 'La ficha del cono de pino: monoica, estróbilo compuesto, dos óvulos invertidos, dos años, semilla alada', pinus);
+  const juni = CM.describe(GYMNO.byId('juniperus-f'), 'mat', 'es').map(p => p.html).join(' ');
+  ok(/gálbulo/.test(juni) && /no es un fruto/.test(juni), 'El táscate: el cono se vuelve un gálbulo, que no es un fruto');
+  const cyc = CM.sheet(GYMNO.byId('cycas-f'), 'es').map(r => r.v).join(' ');
+  ok(/Sin cono/.test(cyc) && /Dioica/.test(cyc), 'Cycas: sin cono femenino y planta dioica');
+  sec('1b. Revisión botánica (regresiones)');
+  const D = (id, st) => CM.describe(GYMNO.byId(id), st || 'mat', 'es').map(p => p.html).join(' ');
+  const Sh = (m) => CM.sheet(m, 'es').map(r => r.k + ': ' + r.v).join(' | ');
+  ok(GYMNO.grpById('cupressaceae').order === 'Cupressales' && GYMNO.grpById('taxaceae').order === 'Cupressales' && GYMNO.grpById('pinaceae').order === 'Pinales' && GYMNO.grpById('podocarpaceae').order === 'Araucariales', 'Órdenes: Cupressaceae y Taxaceae en Cupressales; Pinaceae en Pinales; Podocarpaceae y Araucariaceae en Araucariales');
+  ok(/no hay <dfn[^>]*>gota de polinización/.test(D('abies-f', 'pol')) && /embudo/.test(D('abies-f', 'pol')), 'Abies: no hay gota de polinización (micrópilo en embudo)');
+  ok(/germina sobre la escama/.test(D('arau-f', 'pol')) && /atrapado por la <dfn[^>]*>gota/.test(D('pinus-f', 'pol')), 'Araucaria: el polen germina sobre la escama; el pino sí tiene gota');
+  const psm = GYMNO.speciesModel(GYMNO.SPECIES.find(s => /Pseudotsuga/.test(s.sci)), 'm'), psf = GYMNO.speciesModel(GYMNO.SPECIES.find(s => /Pseudotsuga/.test(s.sci)), 'f');
+  ok(psm.pollen === 'plain' && /no hay <dfn[^>]*>gota/.test(CM.describe(psf, 'pol', 'es').map(p => p.html).join(' ')), 'Pseudotsuga: polen sin sacos y sin gota de polinización, aunque su modelo parte del oyamel');
+  ok(/Lo polinizan escarabajos/.test(D('dioon-m')) && /Lo poliniza el viento/.test(D('pinus-m')) && !/Lo poliniza escarabajos|Lo poliniza insectos/.test(GYMNO.STROBILI.map(s => D(s.id)).join(' ')), 'Concordancia: «Lo polinizan escarabajos», «Lo poliniza el viento»');
+  ok(/uno o dos óvulos erectos/.test(Sh(GYMNO.byId('juniperus-f'))) && !/peltad/.test(D('juniperus-f') + Sh(GYMNO.byId('juniperus-f'))) && !/un óvulos|one erect ovules/.test(GYMNO.STROBILI.map(s => Sh(s) + CM.sheet(s, 'en').map(r => r.v).join(' ')).join(' ')), 'El gálbulo no tiene escamas peltadas; sin «un óvulos»');
+  ok(/anteróforo con 2–8 sinangios/.test(Sh(GYMNO.byId('ephedra-m'))) && GYMNO.byId('ephedra-m').poll === 'wind' && /3–5 pares/.test(Sh(GYMNO.byId('ephedra-f'))), 'Ephedra: anteróforo con 2–8 sinangios, polinización por viento, 3–5 pares de brácteas');
+  ok(/dos alas laterales/.test(Sh(GYMNO.byId('arau-f'))) && GYMNO.byId('arau-f').mature.m === 18, 'Araucaria: la escama, con la semilla soldada, lleva las alas; madura en unos 18 meses');
+  const spn = s => GYMNO.SPECIES.find(x => x.sci === s);
+  ok(spn('Zamia furfuracea').nom === 'P' && spn('Hesperocyparis lusitanica').nom === 'Pr' && !spn('Platycladus orientalis') && /Durango/.test(spn('Pinus maximartinezii').note.es), 'NOM-059: Zamia furfuracea en peligro (P), cedro blanco Pr; pino azul también en Durango');
+  ok(GYMNO.TRAITS.every(t => !/Puede pasar más de un año/.test(t.es)) && /En los pinos/.test(GYMNO.TRAITS.map(t => t.es).join(' ')), 'El enunciado sobre el año entre polinización y fecundación se limita a los pinos (los encinos rojos también tardan)');
+  ok(/La única cícada sin cono femenino/.test(GYMNO.grpById('cycadaceae').chars.es.join(' ')), 'Cycas es la única cícada sin cono femenino (Ginkgo y Taxus tampoco tienen cono)');
+  const cb = W.GYMNO.speciesModel(GYMNO.SPECIES.find(s => s.sci === 'Pinus cembroides'), 'f');
+  ok(cb.wing === false && cb.shape === 'glob' && CM.sheet(cb, 'es').some(r => /Sin ala/.test(r.v)), 'Una especie cambia lo que difiere de su ejemplo: el piñonero tiene conos globosos y semillas sin ala');
+}
+
+function drawTests(W) {
+  const { GYMNO, Cone3D, ConeFig, CM } = W;
+  sec('2. Dibujos');
+  const bad3 = [];
+  let nPrims = 0;
+  GYMNO.STROBILI.forEach(s => STAGES(s).forEach(st => [0, 0.5, 1].forEach(op => {
+    const sc = Cone3D.build(s, { stage: st, open: op });
+    nPrims += sc.prims.length;
+    if (sc.prims.length < 5) bad3.push(`${s.id} ${st}: casi vacío`);
+    const nums = [];
+    sc.prims.forEach(p => { (p.pts || []).forEach(q => nums.push(...q)); if (p.c) nums.push(...p.c); ['rx', 'ry', 'rz', 'w'].forEach(k => { if (p[k] != null) nums.push(p[k]); }); });
+    if (nums.some(v => !Number.isFinite(v))) bad3.push(`${s.id} ${st} ${op}: coordenadas inválidas`);
+    if (sc.prims.some(p => !p.org)) bad3.push(`${s.id}: pieza sin parte`);
+  })));
+  ok(!bad3.length, `Los 28 modelos en 3D, en las dos etapas y con las escamas cerradas, a medio abrir y abiertas: sin coordenadas inválidas (${nPrims} piezas)`, bad3.slice(0, 10).join('<br>'));
+  const badF = [], unseen = [];
+  GYMNO.STROBILI.forEach(s => STAGES(s).forEach(st => {
+    const views = {
+      '3d': Cone3D.staticSVG(s, { stage: st }) + Cone3D.staticSVG(s, { stage: st, open: 1 }),
+      sec: ConeFig.section(s, { stage: st, labels: true }),
+      dia: ConeFig.diagram(s, { stage: st }),
+      unit: ConeFig.unit(s, { stage: st }),
+    };
+    Object.entries(views).forEach(([k, v]) => { if (hasNaN(v) || !/<svg/.test(v)) badF.push(`${s.id} ${st} ${k}`); });
+    const all = Object.values(views).join('');
+    CM.organs(s, st).forEach(o => { if (!all.includes(`data-org="${o}"`)) unseen.push(`${s.id} ${st}: ${o}`); });
+  }));
+  ok(!badF.length, 'Corte, vista desde arriba y una pieza de las 42 combinaciones, sin valores inválidos', badF.join('<br>'));
+  ok(!unseen.length, 'Cada parte de la leyenda aparece en alguna de las cuatro vistas', unseen.join('<br>'));
+  /* labels of the section: one per part, in reading order, without overlapping */
+  const lab = [];
+  GYMNO.STROBILI.forEach(s => STAGES(s).forEach(st => {
+    const svg = ConeFig.section(s, { stage: st, labels: true });
+    const ys = [...svg.matchAll(/<text class="sc-lbl" x="[^"]+" y="([^"]+)" style="font-size:([^"]+)px">/g)].map(m => [+m[1], +m[2]]);
+    if (!ys.length) lab.push(s.id + ' ' + st + ': sin nombres');
+    for (let i = 1; i < ys.length; i++) if (ys[i][0] - ys[i - 1][0] < ys[i][1] * 1.15) lab.push(`${s.id} ${st}: nombres encimados`);
+  }));
+  ok(!lab.length, 'Los nombres del corte no se enciman', lab.join('<br>'));
+  const sp = Cone3D.place({ n: 13, phyl: 'spiral' }), dec = Cone3D.place({ n: 8, phyl: 'decussate' }), rows = Cone3D.place({ n: 16, phyl: 'rows', rows: 8 });
+  const d1 = ((sp[1].th - sp[0].th) % 360 + 360) % 360;
+  ok(Math.abs(d1 - 137.508) < 0.01, 'Filotaxis espiral: cada pieza a 137.5° de la anterior (ángulo áureo)');
+  ok(dec[0].th === 0 && dec[1].th === 180 && dec[2].th === 90 && dec[3].th === 270 && dec[2].t > dec[0].t, 'Filotaxis decusada: pares opuestos, cada par en cruz con el anterior');
+  ok(rows.slice(0, 8).every((p, j) => Math.abs(p.th - j * 45) < 1e-9) && Math.abs(rows[8].th - 22.5) < 1e-9, 'Hileras verticales (Zamia): cada vuelta alterna con la anterior');
+  const cap = ConeFig.caption(GYMNO.byId('pinus-f'));
+  ok(/137\.5/.test(cap) && /discontinua/.test(cap), 'La vista desde arriba explica la espiral y la línea discontinua');
+  const foc = ConeFig.section(GYMNO.byId('pinus-f'), { stage: 'pol', labels: false, focus: 'ov' });
+  ok(/class="cfig has-hl"/.test(foc) && /class="c-o hl" data-org="ov"/.test(foc), 'Una figura puede resaltar una sola parte (para la autoevaluación)');
+}
+
+async function uiTests(W, D) {
+  const { GYMNO, B7, I18N } = W;
+  const $ = s => D.querySelector(s), $$ = s => [...D.querySelectorAll(s)];
+  const vis = n => n && W.getComputedStyle(n).display !== 'none';
+  const click = n => n && n.dispatchEvent(new W.MouseEvent('click', { bubbles: true }));
+  const over = n => n && n.dispatchEvent(new W.MouseEvent('mouseover', { bubbles: true }));
+  if (I18N.lang !== 'es') I18N.set('es');
+  sec('3. Flor y estróbilo');
+  W.goStep(7);
+  await wait(100);
+  ok($('#panel-7').classList.contains('active') && !$('.step-btn[data-step="7"] .soon'), 'El bloque 7 está listo y abre');
+  B7.showTab('cmp');
+  ok($('#g7FlV svg .p3') && $('#g7StV svg .p3') && /Magnolia/.test($('#g7Fl').selectedOptions[0].textContent), 'Flor de magnolia y cono de pino, lado a lado en 3D');
+  ok($$('#g7Cmp .g-ctab tbody tr').length === GYMNO.CONTRAST.length && $$('#g7Cmp .g-hom').length === GYMNO.HOMOLOGY.length, `Tabla de ${GYMNO.CONTRAST.length} diferencias y ${GYMNO.HOMOLOGY.length} correspondencias`);
+  ok($$('#g7Cmp .g-hom-fig svg').length >= 5 && $$('#g7Cmp .g-hom-fig svg.has-hl').length >= 5, 'Las correspondencias muestran la parte resaltada');
+  over($('#g7Cmp .g-ctab tr[data-org="ov"]'));
+  ok(B7.S.c3dB.svg.classList.contains('has-hl') && $('#g7Cmp .g-ctab tr[data-org="ov"]').classList.contains('hl'), 'Al pasar por la fila «Óvulos» se señala la parte en el estróbilo');
+  const sel = $('#g7St'); sel.value = 'taxus-f'; sel.dispatchEvent(new W.Event('change', { bubbles: true }));
+  ok($('#g7StV svg .p3[data-org="aril"]') && $('#g7StStage'), 'Otro estróbilo en el selector: el tejo, con su arilo');
+  click($('#g7StStage button[data-v="pol"]'));
+  ok(B7.S.cmp.stage === 'pol' && !$('#g7StV svg .p3[data-org="seed"]') && $('#g7StV svg .p3[data-org="ov"]'), 'En la polinización se ve el óvulo, no la semilla');
+
+  sec('4. Estróbilos');
+  B7.showTab('str');
+  ok($$('#g7Nav .g-nav-x').length === GYMNO.EXAMPLES.length && $$('#g7Nav .g-nav-t').length === 4, `El índice tiene los ${GYMNO.EXAMPLES.length} ejemplos en cuatro linajes`);
+  click($('#g7Nav .g-nav-x[data-x="abies"]'));
+  ok(/Abies religiosa/.test($('#g7Head').textContent) && $('#g7Views .cv-3d svg') && $('#g7Views .cv-sec svg.cfig') && $('#g7Views .cv-dia svg.cfig') && $('#g7Views .cv-unit svg.cfig'), 'El oyamel se abre con las cuatro vistas');
+  ok($$('#g7Body .g-sheet tr').length >= 8 && /asoma/.test($('#g7Body .g-sheet').textContent), 'Su ficha dice que la bráctea asoma entre las escamas');
+  const leg = $$('#g7Views .cv-legend .wl[data-org]').map(n => n.dataset.org).join();
+  ok(leg === W.CM.organs(GYMNO.byId('abies-f'), 'mat').join(), 'La leyenda enumera las partes', leg);
+  click($('#g7Views .cv-legend .wl[data-org="bract"]'));
+  ok($('#g7Views .cv-sec svg').classList.contains('has-hl') && $('#g7Views .cv-sec .c-o.hl[data-org="bract"]') && $('#g7Views .cv-3d svg').classList.contains('has-hl'), 'Clic en «Bráctea»: se ilumina en el corte, en la vista desde arriba y en 3D');
+  click($('#g7Views .cv-legend .wl[data-org="bract"]'));
+  click($('#g7Segs [data-seg7="stage"] button[data-v="pol"]'));
+  ok(B7.S.stage === 'pol' && /polinización/.test($('#g7Body .desc-box').textContent) && /e=pol/.test(W.location.hash), 'Etapa de polinización: la descripción y la dirección cambian');
+  click($('#g7Segs [data-seg7="sex"] button[data-v="m"]'));
+  ok(B7.S.sex === 'm' && /Cono de polen/.test($('#g7Body .desc-box').textContent) && !$('#g7Segs [data-seg7="stage"]'), 'Estróbilo masculino: cono de polen, sin etapas');
+  const op = $('#g7Views .cv-open'); op.value = 0.8; op.dispatchEvent(new W.Event('input', { bubbles: true }));
+  ok(B7.S.views.c3d.state.open === 0.8, 'El control «Abrir» separa las escamas');
+  B7.goExample('cycas', 'f', 'mat');
+  ok(/Sin cono/.test($('#g7Body .g-sheet').textContent) && $('#g7Views .cv-openl').style.display === '' && $$('#g7Views .cv-unit figure').length === 2, 'Cycas: sin cono; la vista de una pieza muestra el megasporofilo joven y maduro');
+  B7.goExample('taxus', 'f', 'mat');
+  ok($('#g7Views .cv-openl').style.display === 'none', 'En el tejo no hay escamas que abrir');
+
+  sec('5. Especies de México');
+  B7.showTab('sp');
+  ok($$('#g7Grid .g-card').length === GYMNO.SPECIES.length, `Catálogo con ${GYMNO.SPECIES.length} especies`);
+  document.getElementById('app').scrollIntoView(); $('#g7Grid').scrollIntoView(); for (let k = 0; k < 30 && !$$('#g7Grid .g-fig svg').length; k++) await wait(100);
+  ok($$('#g7Grid .g-fig svg').length > 0, 'Las tarjetas dibujan su estróbilo al aparecer');
+  click($('#g7Sp [data-flt="nom:1"]'));
+  const shownNom = $$('#g7Grid .g-card').filter(c => c.style.display !== 'none').length;
+  ok(shownNom === GYMNO.SPECIES.filter(s => s.nom).length && shownNom > 0, `Filtro «Protegidas (NOM-059)»: ${shownNom} especies`);
+  click($('#g7Sp [data-flt="nom:1"]'));
+  const s = $('#g7Search'); s.value = 'oyamel'; s.dispatchEvent(new W.Event('input', { bubbles: true }));
+  ok($$('#g7Grid .g-card').filter(c => c.style.display !== 'none').length === 1, 'La búsqueda encuentra por nombre común (oyamel)');
+  s.value = ''; s.dispatchEvent(new W.Event('input', { bubbles: true }));
+  B7.openSpecies('pinus-cembroides');
+  ok(/Pinus cembroides/.test($('#g7Sp .g-head').textContent) && $('#g7SpViews .cv-3d svg') && /Sin ala/.test($('#g7Sp .g-sheet').textContent) && /sp=pinus-cembroides/.test(W.location.hash), 'La ficha del piñonero: sus propias vistas, semillas sin ala y su dirección');
+  click($('#g7Sp .fs-pn [data-sp]'));
+  ok(!/Pinus cembroides/.test($('#g7Sp .g-head h2').textContent), 'Botón para ir a la especie vecina');
+  click($('#g7Sp [data-act7="list"]'));
+  ok($$('#g7Grid .g-card').length === GYMNO.SPECIES.length, 'Regresa al catálogo');
+
+  sec('6. Enlaces con otros bloques');
+  const t = B7.termLink('epimatium');
+  ok(t && t.ex === 'podo' && t.sex === 'f', 'El glosario sabe dónde se ve cada término («epimacio» → Podocarpus)');
+  B7.showTerm('aril');
+  ok(B7.S.tab === 'str' && B7.S.ex === 'taxus', '«Ver en Gimnospermas» desde el glosario abre el ejemplo');
+  W.location.hash = '#b7&t=str&x=juniperus&s=f&e=mat';
+  B7.S.built && W.goStep(7, { fromHash: true });
+  await wait(50);
+  W.goStep(1); await wait(50);
+  W.location.hash = '#b7&sp=taxus-globosa';
+  await wait(250);
+  ok($('#panel-7').classList.contains('active') && B7.S.tab === 'sp' && /Taxus globosa/.test($('#g7Sp .g-head').textContent), 'Un enlace abre directamente una especie (#b7&sp=taxus-globosa)');
+  /* the gymnosperm challenges of Block 6 */
+  W.goStep(6);
+  W.B6.begin('practice', { types: ['gname', 'ggroup', 'gflor'], n: 6, level: 'adv', conv: 'classic', seed: 707, reveal: 'full', time: 0 });
+  let okQ = 0;
+  for (let k = 0; k < 6; k++) {
+    const q = W.B6.S.qs[W.B6.S.i];
+    if ((q.type === 'gname' && $('#q6Run .q-fig svg.cfig.has-hl')) || (q.type === 'ggroup' && $('#q6Run .q-fig svg.c3d')) || (q.type === 'gflor' && ($('#q6Run .q-stmt') || $('#q6Run .q-fig svg')))) okQ++;
+    click($(`#q6Run .q-opt[data-k="${q.correct}"]`));
+    if (/Correcto/.test($('#q6Fb').textContent)) okQ++;
+    click($('#q6Run [data-act="next"]') || $('#q6Run [data-act="finish"]'));
+  }
+  ok(okQ === 12 && /100 %/.test($('#q6End .q-big').textContent), 'Autoevaluación: los tres retos de gimnospermas se ven y se califican (6 de 6)', okQ + '/12');
+  W.goStep(7);
+
+  sec('7. Idioma y teléfono');
+  I18N.set('en');
+  B7.showTab('str');
+  ok(/Character sheet/.test($('#g7Body').textContent) && /Seen from above|Longitudinal section/.test($('#g7Views').textContent), 'En inglés');
+  I18N.set('es');
+  for (const h of ['b7', 'b7&t=str&x=pinus', 'b7&t=sp', 'b7&sp=dioon-edule']) {
+    const fr = document.createElement('iframe');
+    fr.style.cssText = 'width:390px;height:800px';
+    document.body.appendChild(fr);
+    fr.src = '../index.html?w=' + h.length + '#' + h;
+    await new Promise(r => { fr.onload = r; });
+    await wait(500);
+    const M = fr.contentWindow.document;
+    const o = M.documentElement.scrollWidth - M.documentElement.clientWidth;
+    ok(o <= 0, `Sin desbordamiento horizontal a 390 px (#${h})`, o > 0 ? o + ' px' : '');
+    fr.remove();
+  }
+}
+
+function report() {
+  const bad = results.filter(r => !r.pass), n = results.filter(r => !r.info).length;
+  const sum = document.getElementById('sum');
+  sum.innerHTML = bad.length ? `<span class="bad">${bad.length} de ${n} pruebas fallan</span>` : `<span class="ok">Las ${n} pruebas pasan</span>`;
+  sum.dataset.pass = n - bad.length; sum.dataset.fail = bad.length;
+  let h = '', cur = null;
+  results.forEach(r => {
+    if (r.section !== cur) { if (cur !== null) h += '</table>'; h += `<h2>${r.section}</h2><table>`; cur = r.section; }
+    h += `<tr><td class="r ${r.info ? '' : r.pass ? 'ok' : 'bad'}">${r.info ? 'i' : r.pass ? '✓' : '✗'}</td><td>${r.name}${r.detail ? `<div class="note">${r.detail}</div>` : ''}</td></tr>`;
+  });
+  document.getElementById('out').innerHTML = h + '</table>';
+}
+</script>
+</body>
+</html>
